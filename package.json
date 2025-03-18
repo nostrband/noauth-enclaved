@@ -1,0 +1,26 @@
+{
+  "name": "noauth-enclaved",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "nodemon --exec tsx src/index.ts"
+  },
+  "author": "artur@nostr.band",
+  "license": "MIT",
+  "dependencies": {
+    "@noble/ciphers": "^1.2.1",
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
+    "@scure/base": "^1.2.4",
+    "node-socks5-server": "^1.1.0",
+    "nostr-tools": "^2.11.0",
+    "socks-proxy-agent": "^8.0.5",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.0"
+  }
+}
