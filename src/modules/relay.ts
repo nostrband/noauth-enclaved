@@ -25,8 +25,13 @@ export class Relay {
   private relayUrl: string;
   private agent: SocksProxyAgent;
   private ws: WebSocket;
-  private publishing = new Map<string, () => void>();
+  private publishing = new Map<
+    string,
+    { ok: () => void; err: (e: any) => void }
+  >();
   private reqs = new Map<string, Req>();
+  private openPromise?: Promise<void>;
+  private openCb?: () => void;
 
   constructor(relayUrl: string, agent: SocksProxyAgent) {
     this.relayUrl = relayUrl;
@@ -36,16 +41,19 @@ export class Relay {
 
   private connect() {
     console.log(new Date(), "connecting to", this.relayUrl);
-    const ws = new WebSocket(this.relayUrl, { agent: this.agent });
-    ws.onopen = this.onOpen.bind(this);
-    ws.onclose = this.onClose.bind(this);
-    ws.onerror = this.onError.bind(this);
-    ws.onmessage = this.onMessage.bind(this);
-    return ws;
+    this.ws = new WebSocket(this.relayUrl, { agent: this.agent });
+    this.ws.onopen = this.onOpen.bind(this);
+    this.ws.onclose = this.onClose.bind(this);
+    this.ws.onerror = this.onError.bind(this);
+    this.ws.onmessage = this.onMessage.bind(this);
+    // reset open promise
+    this.openPromise = new Promise((ok) => (this.openCb = ok));
+    return this.ws;
   }
 
   private onOpen() {
     console.log(new Date(), "opened", this.relayUrl, "reqs", this.reqs.size);
+    this.openCb?.();
     for (const id of this.reqs.keys()) this.send(id);
   }
 
@@ -59,10 +67,19 @@ export class Relay {
       e.wasClean
     );
     setTimeout(this.connect.bind(this), PAUSE);
+    // reset open promise
+    this.openPromise = new Promise((ok) => (this.openCb = ok));
   }
 
   private onError(e: any) {
-    console.log(new Date(), "relay error", this.relayUrl, e.toString());
+    console.log(
+      new Date(),
+      "relay error",
+      this.relayUrl,
+      e.error,
+      e.message,
+      e.type
+    );
   }
 
   private onMessage(e: MessageEvent) {
@@ -143,18 +160,21 @@ export class Relay {
 
   private onOK(cmd: any[]) {
     if (cmd.length < 4) throw new Error("Bad OK command");
-    if (cmd[2] === false) throw new Error("Failed to publish event");
     const id = cmd[1];
-    const cb = this.publishing.get(id)!;
+    const cbs = this.publishing.get(id);
+    if (!cbs) return;
     this.publishing.delete(id);
-    cb();
+
+    const { ok, err } = cbs;
+    if (cmd[2]) ok();
+    else err("Failed to publish event");
   }
 
   private send(id: string) {
     const req = this.reqs.get(id)!;
     const filter = { ...req.filter };
     if ((req.since || 0) > (filter.since || 0)) filter.since = req.since;
-    const cmd = ["REQ", req.id, req.filter];
+    const cmd = ["REQ", req.id, filter];
     console.log("req", this.relayUrl, cmd);
     this.ws.send(JSON.stringify(cmd));
   }
@@ -172,9 +192,30 @@ export class Relay {
     if (this.ws.readyState === 1) this.send(req.id);
   }
 
-  public publish(e: Event) {
-    return new Promise<void>((ok) => {
-      this.publishing.set(e.id, ok);
+  public publish(e: Event, to: number = 10000) {
+    return new Promise<void>(async (ok, err) => {
+      // timeout handler
+      const timer = setTimeout(() => {
+        this.publishing.delete(e.id);
+        err("Publish timeout");
+      }, to);
+
+      // handlers to process OK message
+      this.publishing.set(e.id, {
+        ok: () => {
+          clearTimeout(timer);
+          ok();
+        },
+        err: (e) => {
+          clearTimeout(timer);
+          err(e);
+        },
+      });
+
+      // make sure connection is open
+      await this.openPromise!;
+
+      // take only valid nostr event fields
       const { id, pubkey, created_at, kind, content, tags, sig } = e;
       const cmd = [
         "EVENT",
@@ -183,5 +224,10 @@ export class Relay {
       console.log("publish", this.relayUrl, cmd[1]);
       this.ws.send(JSON.stringify(cmd));
     });
+  }
+
+  public reconnect() {
+    console.log(new Date(), "reconnect", this.relayUrl);
+    this.ws?.close();
   }
 }

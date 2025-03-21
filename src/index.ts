@@ -1,9 +1,12 @@
+// run ASAP to override crypto.getRandomValues
+nsmInit();
+
 import WebSocket from "ws";
 import { KIND_ADMIN, mainEnclave } from "./enclave";
 import { Nip44 } from "./modules/nip44";
-import { getPublicKey } from "nostr-tools";
 import { finalizeEvent } from "./modules/nostr-tools";
 import { mainParent } from "./parent";
+import { nsmInit } from "./modules/nsm";
 
 // @ts-ignore
 global.WebSocket ??= WebSocket;

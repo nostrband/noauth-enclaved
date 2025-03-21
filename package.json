@@ -14,13 +14,15 @@
     "@noble/ciphers": "^1.2.1",
     "@noble/curves": "^1.8.1",
     "@noble/hashes": "^1.7.1",
-    "@scure/base": "^1.2.4",
+    "aws-nitro-enclaves-nsm-node": "^0.0.2",
+    "cbor2": "^1.12.0",
     "node-socks5-server": "^1.1.0",
     "nostr-tools": "^2.11.0",
     "socks-proxy-agent": "^8.0.5",
     "ws": "^8.18.1"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.0"
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.19.3"
   }
 }

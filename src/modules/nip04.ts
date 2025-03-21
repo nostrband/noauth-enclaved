@@ -1,6 +1,7 @@
 import { randomBytes } from "@noble/hashes/utils";
 import { secp256k1 } from "@noble/curves/secp256k1";
-import { base64 } from "@scure/base";
+// replaced with Buffer.toString("base64")
+// import { base64 } from "@scure/base";
 import { getPublicKey } from "./nostr-tools";
 
 // from nostr-tools
@@ -54,8 +55,9 @@ export class Nip04 {
       cryptoKey,
       plaintext
     );
-    let ctb64 = base64.encode(new Uint8Array(ciphertext));
-    let ivb64 = base64.encode(new Uint8Array(iv.buffer));
+    // base64.encode(
+    let ctb64 = Buffer.from(ciphertext).toString("base64");
+    let ivb64 = Buffer.from(iv.buffer).toString("base64");
     return `${ctb64}?iv=${ivb64}`;
   }
 
@@ -66,8 +68,8 @@ export class Nip04 {
   ): Promise<string> {
     let [ctb64, ivb64] = data.split("?iv=");
     const cryptoKey = await this.getKey(privkey, pubkey);
-    let ciphertext = base64.decode(ctb64);
-    let iv = base64.decode(ivb64);
+    let ciphertext = Buffer.from(ctb64, "base64");
+    let iv = Buffer.from(ivb64, "base64");
     let plaintext = await crypto.subtle.decrypt(
       { name: "AES-CBC", iv },
       cryptoKey,

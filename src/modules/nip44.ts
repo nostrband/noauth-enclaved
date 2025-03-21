@@ -8,7 +8,8 @@ import {
 } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { hmac } from "@noble/hashes/hmac";
-import { base64 } from "@scure/base";
+// replaced with Buffer.toString("base64")
+// import { base64 } from "@scure/base";
 import { getPublicKey } from "./nostr-tools";
 
 // from https://github.com/nbd-wtf/nostr-tools
@@ -110,7 +111,7 @@ const u = {
     if (payload[0] === "#") throw new Error("unknown encryption version");
     let data: Uint8Array;
     try {
-      data = base64.decode(payload);
+      data = Buffer.from(payload, "base64");
     } catch (error) {
       throw new Error("invalid base64: " + (error as Error).message);
     }
@@ -139,9 +140,9 @@ export function encryptNip44(
   const padded = u.pad(plaintext);
   const ciphertext = chacha20(chacha_key, chacha_nonce, padded);
   const mac = u.hmacAad(hmac_key, ciphertext, nonce);
-  return base64.encode(
+  return Buffer.from(
     concatBytes(new Uint8Array([2]), nonce, ciphertext, mac)
-  );
+  ).toString("base64");
 }
 
 export function decryptNip44(

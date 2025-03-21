@@ -1,16 +1,25 @@
 import { SocksProxyAgent } from "socks-proxy-agent";
-import { Event, generateSecretKey, getPublicKey } from "../modules/nostr-tools";
+import { bytesToHex } from "@noble/hashes/utils";
+import {
+  Event,
+  finalizeEvent,
+  generateSecretKey,
+  getPublicKey,
+} from "../modules/nostr-tools";
 import { PubkeyBatcher, now } from "../modules/utils";
 import { Decision, Nip46Req } from "../modules/types";
 import { Perms } from "../modules/perms";
 import { Nip46 } from "../modules/nip46";
 import { SignerImpl } from "../modules/signer";
 import { Relay } from "../modules/relay";
+import { nsmGetAttestation, nsmParseAttestation } from "../modules/nsm";
 
 export const KIND_ADMIN = 24135;
 const KIND_NIP46 = 24133;
 const KIND_DATA = 30078;
+const KIND_ANNOUNCEMENT = 63793;
 
+const ANNOUNCEMENT_INTERVAL = 3600000; // 1h
 const BATCH_SIZE = 1;
 const PERMS_TAG = "nsec.app/perm";
 
@@ -27,9 +36,9 @@ class Nip46Signer extends Nip46 {
     return this.getSigner().getPublicKey();
   }
 
-  private reqSignEvent(req: Nip46Req) {
+  private async reqSignEvent(req: Nip46Req) {
     return JSON.stringify(
-      this.getSigner().signEvent(JSON.parse(req.params[0]))
+      await this.getSigner().signEvent(JSON.parse(req.params[0]))
     );
   }
 
@@ -222,10 +231,60 @@ class PermListener {
   }
 }
 
+function startAnnouncing(privkey: Uint8Array, relay: Relay) {
+  const announce = async () => {
+    const pubkey = getPublicKey(privkey);
+    const attestation = nsmGetAttestation(pubkey);
+    console.log("attestation", attestation);
+    if (!attestation) throw new Error("Failed to get attestation");
+
+    const { pcrs, module_id } = nsmParseAttestation(attestation);
+
+    /**
+from https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
+PCR0	Enclave image file	A contiguous measure of the contents of the image file, without the section data.
+PCR1	Linux kernel and bootstrap	A contiguous measurement of the kernel and boot ramfs data.
+PCR2	Application	A contiguous, in-order measurement of the user applications, without the boot ramfs.
+PCR3	IAM role assigned to the parent instance	A contiguous measurement of the IAM role assigned to the parent instance. Ensures that the attestation process succeeds only when the parent instance has the correct IAM role.
+PCR4	Instance ID of the parent instance	A contiguous measurement of the ID of the parent instance. Ensures that the attestation process succeeds only when the parent instance has a specific instance ID.
+PCR8	Enclave image file signing certificate	A measure of the signing certificate specified for the enclave image file. Ensures that the attestation process succeeds only when the enclave was booted from an enclave image file signed by a specific certificate.
+     */
+
+    const signed = finalizeEvent(
+      {
+        kind: KIND_ANNOUNCEMENT,
+        created_at: now(),
+        content: attestation.toString("base64"),
+        tags: [
+          ["r", "https://nsec.app"],
+          ["m", module_id],
+          ["t", bytesToHex(pcrs.get(0))],
+        ],
+      },
+      privkey
+    );
+    console.log("announcement", signed);
+    try {
+      await relay.publish(signed);
+
+      // schedule next announcement
+      setTimeout(announce, ANNOUNCEMENT_INTERVAL);
+    } catch (e) {
+      console.log("Failed to announce", e);
+      relay.reconnect();
+
+      // retry faster than normal
+      setTimeout(announce, ANNOUNCEMENT_INTERVAL / 10);
+    }
+  };
+  announce();
+}
+
 async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
   // we're talking to the outside world using socks proxy
   // that lives in enclave parent and our tcp traffic
   // is socat-ed through vsock interface
+  console.log(new Date(), "noauth enclave opts", opts);
   const agent = new SocksProxyAgent(opts.proxyUrl);
 
   // new admin key on every restart
@@ -244,7 +303,12 @@ async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
       if (!key) throw new Error("Unknown key");
       const reply = await key.process(e);
       if (!reply) return; // ignored
-      relay.publish(reply);
+      try {
+        await relay.publish(reply);
+      } catch (err) {
+        console.log("failed to publish reply");
+        relay.reconnect();
+      }
     },
   });
 
@@ -298,6 +362,9 @@ async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
   // add admin to request listener, but not perms listener
   keys.set(adminPubkey, adminSigner);
   requestListener.addPubkey(adminPubkey);
+
+  // announce ourselves
+  startAnnouncing(adminPrivkey, relay);
 }
 
 // main
