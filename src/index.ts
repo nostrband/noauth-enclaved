@@ -1,58 +1,12 @@
-// run ASAP to override crypto.getRandomValues
-nsmInit();
-
 import WebSocket from "ws";
-import { KIND_ADMIN, mainEnclave } from "./enclave";
-import { Nip44 } from "./modules/nip44";
-import { finalizeEvent } from "./modules/nostr-tools";
+import { mainEnclave } from "./enclave";
 import { mainParent } from "./parent";
-import { nsmInit } from "./modules/nsm";
+import { nsmInit } from "./enclave/modules/nsm";
+import { mainCli } from "./cli";
 
 // @ts-ignore
 global.WebSocket ??= WebSocket;
 
-const nip44 = new Nip44();
-
-function mainTest(argv: string[]) {
-  const url = argv[0];
-  const privkey = Buffer.from(argv[1], "hex");
-  const adminPubkey = argv[2];
-  const ws = new WebSocket(url);
-  return new Promise<void>((ok, err) => {
-    ws.onopen = () => {
-      const req = {
-        id: "" + Date.now(),
-        method: "import_key",
-        params: [privkey.toString("hex")],
-      };
-      const event = finalizeEvent(
-        {
-          created_at: Math.floor(Date.now() / 1000),
-          kind: KIND_ADMIN,
-          content: nip44.encrypt(privkey, adminPubkey, JSON.stringify(req)),
-          tags: [["p", adminPubkey]],
-        },
-        privkey
-      );
-      console.log("sending", event);
-      const { id, pubkey, kind, created_at, content, tags, sig } = event;
-      ws.send(
-        JSON.stringify([
-          "EVENT",
-          { id, pubkey, kind, created_at, content, tags, sig },
-        ])
-      );
-      ws.onmessage = (e) => {
-        const data = JSON.parse(e.data as string);
-        console.log("got data", data);
-        if (data[0] === "OK" && data[1] === event.id) {
-          if (data[2] === true) ok();
-          else err("Failed to import");
-        }
-      };
-    };
-  });
-}
 
 async function main() {
   console.log(process.argv);
@@ -63,8 +17,8 @@ async function main() {
       return mainEnclave(args);
     case "parent":
       return mainParent(args);
-    case "test":
-      return mainTest(args);
+    case "cli":
+      return mainCli(args);
   }
 }
 

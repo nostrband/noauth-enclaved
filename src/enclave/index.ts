@@ -1,30 +1,30 @@
+import fs from "node:fs";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { bytesToHex } from "@noble/hashes/utils";
 import {
   Event,
+  UnsignedEvent,
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
-} from "../modules/nostr-tools";
-import { PubkeyBatcher, now } from "../modules/utils";
-import { Decision, Nip46Req } from "../modules/types";
-import { Perms } from "../modules/perms";
-import { Nip46 } from "../modules/nip46";
-import { SignerImpl } from "../modules/signer";
-import { Relay } from "../modules/relay";
-import { nsmGetAttestation, nsmParseAttestation } from "../modules/nsm";
+} from "./modules/nostr-tools";
+import { PubkeyBatcher, now } from "./modules/utils";
+import { Decision, Nip46Req } from "./modules/types";
+import { Perms } from "./modules/perms";
+import { Nip46Server } from "./modules/nip46";
+import { SignerImpl } from "./modules/signer";
+import { Relay } from "./modules/relay";
+import { nsmGetAttestation, nsmParseAttestation } from "./modules/nsm";
+import { KIND_ADMIN, KIND_INSTANCE, KIND_NIP46, REPO } from "./modules/consts";
 
-export const KIND_ADMIN = 24135;
-const KIND_NIP46 = 24133;
 const KIND_DATA = 30078;
-const KIND_ANNOUNCEMENT = 63793;
+const APP_TAG = "nsec.app/perm";
 
 const ANNOUNCEMENT_INTERVAL = 3600000; // 1h
 const BATCH_SIZE = 1;
-const PERMS_TAG = "nsec.app/perm";
 
 // nip46 signer for user keys
-class Nip46Signer extends Nip46 {
+class Nip46Signer extends Nip46Server {
   private perms: Perms;
 
   constructor(privkey: Uint8Array, perms: Perms) {
@@ -37,9 +37,19 @@ class Nip46Signer extends Nip46 {
   }
 
   private async reqSignEvent(req: Nip46Req) {
-    return JSON.stringify(
-      await this.getSigner().signEvent(JSON.parse(req.params[0]))
-    );
+    const event: UnsignedEvent = JSON.parse(req.params[0]);
+
+    // make sure apps can't force us to modify our own
+    // permission events
+    if (
+      event.kind === KIND_DATA &&
+      event.tags.find(
+        (t: string[]) => t.length > 1 && t[0] === "t" && t.includes(APP_TAG)
+      )
+    )
+      throw new Error("Forbidden");
+
+    return JSON.stringify(await this.getSigner().signEvent(event));
   }
 
   private reqNip04Encrypt(req: Nip46Req) {
@@ -85,7 +95,7 @@ class Nip46Signer extends Nip46 {
 }
 
 // admin interface for 'import_key' method
-class AdminSigner extends Nip46 {
+class AdminSigner extends Nip46Server {
   private onImportKey: (key: string) => void;
 
   constructor(
@@ -204,7 +214,7 @@ class PermListener {
         fetch: true,
         filter: {
           authors: [pubkey],
-          "#t": [PERMS_TAG],
+          "#t": [APP_TAG],
           kinds: [KIND_DATA],
           // don't go crazy
           limit: 100,
@@ -218,7 +228,7 @@ class PermListener {
         fetch: false,
         filter: {
           authors: pubkeys,
-          "#t": [PERMS_TAG],
+          "#t": [APP_TAG],
           kinds: [KIND_DATA],
           since: now() - 10,
         },
@@ -231,12 +241,15 @@ class PermListener {
   }
 }
 
-function startAnnouncing(privkey: Uint8Array, relay: Relay) {
+function startAnnouncing(privkey: Uint8Array, inboxRelayUrl: string, relay: Relay) {
   const announce = async () => {
     const pubkey = getPublicKey(privkey);
     const attestation = nsmGetAttestation(pubkey);
     console.log("attestation", attestation);
     if (!attestation) throw new Error("Failed to get attestation");
+
+    const pkg = JSON.parse(fs.readFileSync("package.json").toString("utf8"));
+    console.log("pkg", pkg);
 
     const { pcrs, module_id } = nsmParseAttestation(attestation);
 
@@ -252,13 +265,23 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
 
     const signed = finalizeEvent(
       {
-        kind: KIND_ANNOUNCEMENT,
+        kind: KIND_INSTANCE,
         created_at: now(),
         content: attestation.toString("base64"),
         tags: [
-          ["r", "https://nsec.app"],
+          ["r", REPO],
+          ["name", pkg.name],
+          ["v", pkg.version],
           ["m", module_id],
-          ["t", bytesToHex(pcrs.get(0))],
+          ...[0, 1, 2, 4, 8].map((id) => [
+            "x",
+            bytesToHex(pcrs.get(id)!),
+            `PCR${id}`,
+          ]),
+          // admin interface relay with spam protection
+          ["relay", inboxRelayUrl],
+          // expires in 3 hours, together with attestation doc
+          ["expiration", "" + (now() + 3 * 3600)],
         ],
       },
       privkey
@@ -280,7 +303,10 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
   announce();
 }
 
-async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
+export async function startEnclave(opts: {
+  relayUrl: string;
+  proxyUrl: string;
+}) {
   // we're talking to the outside world using socks proxy
   // that lives in enclave parent and our tcp traffic
   // is socat-ed through vsock interface
@@ -293,7 +319,7 @@ async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
   console.log("adminPubkey", adminPubkey);
 
   // list of nip46 handlers: admin + all user keys
-  const keys = new Map<string, Nip46>();
+  const keys = new Map<string, Nip46Server>();
 
   // main relay + listener
   const relay = new Relay(opts.relayUrl, agent);
@@ -364,7 +390,7 @@ async function startEnclave(opts: { relayUrl: string; proxyUrl: string }) {
   requestListener.addPubkey(adminPubkey);
 
   // announce ourselves
-  startAnnouncing(adminPrivkey, relay);
+  startAnnouncing(adminPrivkey, relay.url, relay);
 }
 
 // main

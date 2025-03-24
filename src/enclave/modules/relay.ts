@@ -16,27 +16,44 @@ export interface Req {
   fetch: boolean;
   // used if fetch=false to re-subscribe since last update
   since?: number;
-  onEvent: (e: Event) => void;
+  onEvent?: (e: Event) => void;
   onClosed?: () => void;
-  onEOSE?: () => void;
+  onEOSE?: (events: Event[]) => void;
 }
 
 export class Relay {
   private relayUrl: string;
-  private agent: SocksProxyAgent;
-  private ws: WebSocket;
+  private agent?: SocksProxyAgent;
+  private ws?: WebSocket;
   private publishing = new Map<
     string,
     { ok: () => void; err: (e: any) => void }
   >();
-  private reqs = new Map<string, Req>();
+  private reqs = new Map<string, { req: Req, events: Event[] }>();
   private openPromise?: Promise<void>;
   private openCb?: () => void;
 
-  constructor(relayUrl: string, agent: SocksProxyAgent) {
+  constructor(relayUrl: string, agent?: SocksProxyAgent) {
     this.relayUrl = relayUrl;
     this.agent = agent;
-    this.ws = this.connect();
+    this.connect();
+  }
+
+  public dispose() {
+    try {
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      }
+    } catch {}
+    this.ws = undefined;
+    this.publishing.clear();
+    this.reqs.clear();
+    this.openPromise = undefined;
+    this.openCb = undefined;
   }
 
   private connect() {
@@ -48,7 +65,6 @@ export class Relay {
     this.ws.onmessage = this.onMessage.bind(this);
     // reset open promise
     this.openPromise = new Promise((ok) => (this.openCb = ok));
-    return this.ws;
   }
 
   private onOpen() {
@@ -66,7 +82,10 @@ export class Relay {
       e.reason,
       e.wasClean
     );
-    setTimeout(this.connect.bind(this), PAUSE);
+    setTimeout(() => {
+      // stop if disposed
+      if (this.ws) this.connect();
+    }, PAUSE);
     // reset open promise
     this.openPromise = new Promise((ok) => (this.openCb = ok));
   }
@@ -121,10 +140,11 @@ export class Relay {
 
       // update cursor so that even after some relay issues
       // we know where we stopped the last time
-      if (!req.fetch) req.since = event.created_at;
+      if (!req.req.fetch) req.req.since = event.created_at;
 
       // notify subscription
-      req.onEvent(event);
+      req.events.push(event);
+      req.req.onEvent?.(event);
     } catch (err) {
       console.log("Bad event", this.relayUrl, err, cmd);
     }
@@ -135,8 +155,8 @@ export class Relay {
     const reqId = cmd[1];
     const req = this.reqs.get(reqId);
     if (!req) return;
-    req.onEOSE?.();
-    if (req.fetch) this.reqs.delete(reqId);
+    req.req.onEOSE?.(req.events);
+    if (req.req.fetch) this.reqs.delete(reqId);
   }
 
   private onNotice(cmd: any[]) {
@@ -149,7 +169,7 @@ export class Relay {
     const reqId = cmd[1];
     const req = this.reqs.get(reqId);
     if (!req) return;
-    req.onClosed?.();
+    req.req.onClosed?.();
 
     // unconditionally delete the req to make sure
     // we don't keep re-sending this req, as
@@ -172,24 +192,29 @@ export class Relay {
 
   private send(id: string) {
     const req = this.reqs.get(id)!;
-    const filter = { ...req.filter };
-    if ((req.since || 0) > (filter.since || 0)) filter.since = req.since;
-    const cmd = ["REQ", req.id, filter];
+    const filter = { ...req.req.filter };
+    if ((req.req.since || 0) > (filter.since || 0)) filter.since = req.req.since;
+    const cmd = ["REQ", req.req.id, filter];
     console.log("req", this.relayUrl, cmd);
-    this.ws.send(JSON.stringify(cmd));
+    this.ws!.send(JSON.stringify(cmd));
+  }
+
+  public get url() {
+    return this.relayUrl;
   }
 
   public close(id: string) {
     if (!this.reqs.delete(id)) return;
-    if (this.ws.readyState !== 1) return;
+    if (this.ws!.readyState !== 1) return;
     const cmd = ["CLOSE", id];
     console.log("close", this.relayUrl, cmd);
-    this.ws.send(JSON.stringify(cmd));
+    this.ws!.send(JSON.stringify(cmd));
   }
 
   public req(req: Req) {
-    this.reqs.set(req.id, req);
-    if (this.ws.readyState === 1) this.send(req.id);
+    if (!req.onEOSE && !req.onEvent) throw new Error("Specify either onEOSE or onEvent");
+    this.reqs.set(req.id, { req, events: [] });
+    if (this.ws!.readyState === 1) this.send(req.id);
   }
 
   public publish(e: Event, to: number = 10000) {
@@ -222,7 +247,7 @@ export class Relay {
         { id, pubkey, created_at, kind, content, tags, sig },
       ];
       console.log("publish", this.relayUrl, cmd[1]);
-      this.ws.send(JSON.stringify(cmd));
+      this.ws!.send(JSON.stringify(cmd));
     });
   }
 

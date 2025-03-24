@@ -1,4 +1,4 @@
-NAME=noauth_enclaved
+NAME=noauth-enclaved
 SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
 echo "Commit timestamp" $SOURCE_DATE_EPOCH
 
@@ -18,7 +18,8 @@ docker \
     --opt build-arg:SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} \
     --local dockerfile=. \
     --local context=. \
-    --output type=docker,name=${NAME},dest=${NAME}.tar,buildinfo=false,rewrite-timestamp=true \
+    --metadata-file=build/docker.json \
+    --output type=docker,name=${NAME},dest=build/${NAME}.tar,buildinfo=false,rewrite-timestamp=true \
     --progress=plain \
   
 

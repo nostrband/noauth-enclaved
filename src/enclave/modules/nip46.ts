@@ -4,7 +4,7 @@ import { now } from "./utils";
 
 const NSEC_APP_ORIGIN = "https://use.nsec.app";
 
-export class Nip46 {
+export class Nip46Server {
   private signer: Signer;
   private kind: number;
 
