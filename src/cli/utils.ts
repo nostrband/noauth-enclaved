@@ -97,7 +97,7 @@ export function prepareRelays(
       readRelays: string[];
     }
   >,
-  maxRelaysPerPubkey: number,
+  maxRelaysPerPubkey: number
   // addFallback = false
 ) {
   const prepare = (relays: string[], maxRelaysPerPubkey: number) => {
@@ -162,7 +162,7 @@ export function prepareRelays(
 
 export async function fetchRelays(
   pubkeys: string[],
-  maxRelaysPerPubkey: number = 10,
+  maxRelaysPerPubkey: number = 10
   // addFallback = false
 ) {
   const events = await fetchFromRelays(
@@ -187,4 +187,17 @@ export async function fetchRelays(
 
 export async function fetchOutboxRelays(pubkeys: string[]) {
   return (await fetchRelays(pubkeys)).write;
+}
+
+export function rawEvent(e: Event) {
+  const { id, created_at, pubkey, kind, tags, content, sig } = e;
+  return {
+    id,
+    created_at,
+    pubkey,
+    kind,
+    tags,
+    content,
+    sig,
+  };
 }

@@ -7,7 +7,6 @@ import { mainCli } from "./cli";
 // @ts-ignore
 global.WebSocket ??= WebSocket;
 
-
 async function main() {
   console.log(process.argv);
   const module = process.argv[2];
@@ -18,7 +17,12 @@ async function main() {
     case "parent":
       return mainParent(args);
     case "cli":
-      return mainCli(args);
+      return mainCli(args)
+        .then(() => process.exit())
+        .catch((e) => {
+          console.error(e);
+          process.exit(-1);
+        });
   }
 }
 
