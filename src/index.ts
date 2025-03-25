@@ -1,7 +1,6 @@
 import WebSocket from "ws";
 import { mainEnclave } from "./enclave";
 import { mainParent } from "./parent";
-import { nsmInit } from "./enclave/modules/nsm";
 import { mainCli } from "./cli";
 
 // @ts-ignore

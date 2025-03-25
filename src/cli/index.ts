@@ -8,7 +8,6 @@ import {
   REPO,
   KIND_BUILD_SIGNATURE,
 } from "../enclave/modules/consts";
-import { sha384 } from "@noble/hashes/sha2";
 import {
   nip19,
   validateEvent,
@@ -16,10 +15,11 @@ import {
 } from "../enclave/modules/nostr-tools";
 import readline from "node:readline";
 import { Nip46Client } from "./nip46-client";
-import { now } from "../enclave/modules/utils";
+import { now, pcrDigest } from "../enclave/modules/utils";
 import { fetchOutboxRelays, rawEvent } from "./utils";
 import { Relay } from "../enclave/modules/relay";
 import { Signer } from "../enclave/modules/types";
+import { sha384 } from "@noble/hashes/sha2";
 
 async function readLine() {
   const rl = readline.createInterface({
@@ -41,6 +41,7 @@ async function importKey({
   relayUrl: string;
   adminPubkey: string;
 }) {
+  console.log("Enter nsec:");
   let line = await readLine();
   line = line.trim();
   if (line.startsWith("nsec1")) {
@@ -243,13 +244,7 @@ async function ensureInstanceSignature(dir: string) {
   const instanceId = line;
   console.log("instance", instanceId);
   // https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html#pcr4
-  const pcr4 = bytesToHex(
-    sha384
-      .create()
-      .update(new Uint8Array(384 / 8))
-      .update(instanceId)
-      .digest()
-  );
+  const pcr4 = pcrDigest(instanceId);
   console.log("pcr4", pcr4);
 
   const signer = await createSigner(pubkey);

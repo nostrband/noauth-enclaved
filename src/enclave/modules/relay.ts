@@ -27,11 +27,9 @@ export class Relay {
   private ws?: WebSocket;
   private publishing = new Map<
     string,
-    { ok: () => void; err: (e: any) => void }
+    { event: Event; ok: () => void; err: (e: any) => void }
   >();
-  private reqs = new Map<string, { req: Req, events: Event[] }>();
-  private openPromise?: Promise<void>;
-  private openCb?: () => void;
+  private reqs = new Map<string, { req: Req; events: Event[] }>();
 
   constructor(relayUrl: string, agent?: SocksProxyAgent) {
     this.relayUrl = relayUrl;
@@ -40,20 +38,10 @@ export class Relay {
   }
 
   public dispose() {
-    try {
-      if (this.ws) {
-        this.ws.onclose = null;
-        this.ws.onopen = null;
-        this.ws.onmessage = null;
-        this.ws.onerror = null;
-        this.ws.close();
-      }
-    } catch {}
+    if (this.ws && this.ws.readyState !== WebSocket.CONNECTING) this.ws.close();
     this.ws = undefined;
     this.publishing.clear();
     this.reqs.clear();
-    this.openPromise = undefined;
-    this.openCb = undefined;
   }
 
   private connect() {
@@ -63,13 +51,19 @@ export class Relay {
     this.ws.onclose = this.onClose.bind(this);
     this.ws.onerror = this.onError.bind(this);
     this.ws.onmessage = this.onMessage.bind(this);
-    // reset open promise
-    this.openPromise = new Promise((ok) => (this.openCb = ok));
   }
 
   private onOpen() {
-    console.log(new Date(), "opened", this.relayUrl, "reqs", this.reqs.size);
-    this.openCb?.();
+    console.log(
+      new Date(),
+      "opened",
+      this.relayUrl,
+      "reqs",
+      this.reqs.size,
+      "publish",
+      this.publishing.size
+    );
+    for (const { event } of this.publishing.values()) this.publishEvent(event);
     for (const id of this.reqs.keys()) this.send(id);
   }
 
@@ -86,8 +80,6 @@ export class Relay {
       // stop if disposed
       if (this.ws) this.connect();
     }, PAUSE);
-    // reset open promise
-    this.openPromise = new Promise((ok) => (this.openCb = ok));
   }
 
   private onError(e: any) {
@@ -184,7 +176,7 @@ export class Relay {
     const cbs = this.publishing.get(id);
     if (!cbs) return;
     this.publishing.delete(id);
-
+    console.log("publish result", this.relayUrl, cmd);
     const { ok, err } = cbs;
     if (cmd[2]) ok();
     else err("Failed to publish event");
@@ -193,9 +185,18 @@ export class Relay {
   private send(id: string) {
     const req = this.reqs.get(id)!;
     const filter = { ...req.req.filter };
-    if ((req.req.since || 0) > (filter.since || 0)) filter.since = req.req.since;
+    if ((req.req.since || 0) > (filter.since || 0))
+      filter.since = req.req.since;
     const cmd = ["REQ", req.req.id, filter];
     console.log("req", this.relayUrl, cmd);
+    this.ws!.send(JSON.stringify(cmd));
+  }
+
+  private publishEvent(e: Event) {
+    // take only valid nostr event fields
+    const { id, pubkey, created_at, kind, content, tags, sig } = e;
+    const cmd = ["EVENT", { id, pubkey, created_at, kind, content, tags, sig }];
+    console.log("publish", this.relayUrl, cmd[1]);
     this.ws!.send(JSON.stringify(cmd));
   }
 
@@ -205,28 +206,31 @@ export class Relay {
 
   public close(id: string) {
     if (!this.reqs.delete(id)) return;
-    if (this.ws!.readyState !== 1) return;
+    if (this.ws!.readyState !== WebSocket.OPEN) return;
     const cmd = ["CLOSE", id];
     console.log("close", this.relayUrl, cmd);
     this.ws!.send(JSON.stringify(cmd));
   }
 
   public req(req: Req) {
-    if (!req.onEOSE && !req.onEvent) throw new Error("Specify either onEOSE or onEvent");
+    if (!req.onEOSE && !req.onEvent)
+      throw new Error("Specify either onEOSE or onEvent");
     this.reqs.set(req.id, { req, events: [] });
-    if (this.ws!.readyState === 1) this.send(req.id);
+    if (this.ws!.readyState === WebSocket.OPEN) this.send(req.id);
   }
 
   public publish(e: Event, to: number = 10000) {
     return new Promise<void>(async (ok, err) => {
       // timeout handler
       const timer = setTimeout(() => {
+        console.log("publish timeout", this.relayUrl, e.id);
         this.publishing.delete(e.id);
         err("Publish timeout");
       }, to);
 
       // handlers to process OK message
       this.publishing.set(e.id, {
+        event: e,
         ok: () => {
           clearTimeout(timer);
           ok();
@@ -237,22 +241,16 @@ export class Relay {
         },
       });
 
-      // make sure connection is open
-      await this.openPromise!;
-
-      // take only valid nostr event fields
-      const { id, pubkey, created_at, kind, content, tags, sig } = e;
-      const cmd = [
-        "EVENT",
-        { id, pubkey, created_at, kind, content, tags, sig },
-      ];
-      console.log("publish", this.relayUrl, cmd[1]);
-      this.ws!.send(JSON.stringify(cmd));
+      if (this.ws!.readyState !== WebSocket.OPEN) {
+        console.log("publish waiting for relay connect", this.relayUrl, e.id);
+      } else {
+        this.publishEvent(e);
+      }
     });
   }
 
   public reconnect() {
     console.log(new Date(), "reconnect", this.relayUrl);
-    this.ws?.close();
+    if (this.ws?.readyState !== WebSocket.CONNECTING) this.ws?.close();
   }
 }

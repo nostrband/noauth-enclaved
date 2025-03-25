@@ -4,6 +4,7 @@ import {
   getAttestationDoc,
 } from "aws-nitro-enclaves-nsm-node";
 import { decode } from "cbor2";
+import { AttestationData } from "./types";
 
 let fd: number;
 
@@ -43,14 +44,14 @@ export function nsmInit() {
   };
 }
 
-export function nsmGetAttestation(pubkey: string) {
+export function nsmGetAttestation(pubkey?: string) {
   if (!fd) return "";
 
   return getAttestationDoc(
     fd,
     null, // user data
     null, // nonce
-    Buffer.from(pubkey, "hex")
+    pubkey ? Buffer.from(pubkey, "hex") : null
   );
 }
 
@@ -59,17 +60,7 @@ export function nsmParseAttestation(att: Buffer) {
   console.log("COSE_Sign1", COSE_Sign1);
   if (COSE_Sign1.length !== 4) throw new Error("Bad attestation");
 
-  const payload: {
-    pcrs: Map<number, Uint8Array>;
-    module_id: string;
-  } = decode(COSE_Sign1[2]);
-  console.log("payload", payload);
-
-  const { pcrs, module_id } = payload;
-  return {
-    // PCR0-8
-    pcrs,
-    // id of enclave instance
-    module_id,
-  };
+  const data: AttestationData = decode(COSE_Sign1[2]);
+  console.log("data", data);
+  return data;
 }

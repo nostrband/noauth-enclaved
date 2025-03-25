@@ -22,3 +22,8 @@ export interface Nip46Req {
 }
 
 export type Decision = "allow" | "disallow" | "ignore" | "ask";
+
+export interface AttestationData {
+  pcrs: Map<number, Uint8Array>;
+  module_id: string;
+}

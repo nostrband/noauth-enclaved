@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# exit on failure
+set -e
+
 # name of the image files
 FILE=noauth-enclaved
 # target dir

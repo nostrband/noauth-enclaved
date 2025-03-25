@@ -9,19 +9,27 @@ import {
   getPublicKey,
 } from "./modules/nostr-tools";
 import { PubkeyBatcher, now } from "./modules/utils";
-import { Decision, Nip46Req } from "./modules/types";
+import { AttestationData, Decision, Nip46Req } from "./modules/types";
 import { Perms } from "./modules/perms";
 import { Nip46Server } from "./modules/nip46";
 import { SignerImpl } from "./modules/signer";
 import { Relay } from "./modules/relay";
 import { nsmGetAttestation, nsmParseAttestation } from "./modules/nsm";
 import { KIND_ADMIN, KIND_INSTANCE, KIND_NIP46, REPO } from "./modules/consts";
+import { WebSocket } from "ws";
+import { verifyBuild, verifyInstance } from "./modules/parent";
 
 const KIND_DATA = 30078;
 const APP_TAG = "nsec.app/perm";
 
 const ANNOUNCEMENT_INTERVAL = 3600000; // 1h
 const BATCH_SIZE = 1;
+
+interface Info {
+  build?: Event;
+  instance?: Event;
+  instanceAnnounceRelays?: string[];
+}
 
 // nip46 signer for user keys
 class Nip46Signer extends Nip46Server {
@@ -241,7 +249,21 @@ class PermListener {
   }
 }
 
-function startAnnouncing(privkey: Uint8Array, inboxRelayUrl: string, relay: Relay) {
+function startAnnouncing({
+  agent,
+  build,
+  instance,
+  privkey,
+  inboxRelayUrl,
+  instanceAnnounceRelays = [],
+}: {
+  agent: SocksProxyAgent;
+  build?: Event;
+  instance?: Event;
+  privkey: Uint8Array;
+  inboxRelayUrl: string;
+  instanceAnnounceRelays?: string[];
+}) {
   const announce = async () => {
     const pubkey = getPublicKey(privkey);
     const attestation = nsmGetAttestation(pubkey);
@@ -254,7 +276,7 @@ function startAnnouncing(privkey: Uint8Array, inboxRelayUrl: string, relay: Rela
     const { pcrs, module_id } = nsmParseAttestation(attestation);
 
     /**
-from https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
+https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html
 PCR0	Enclave image file	A contiguous measure of the contents of the image file, without the section data.
 PCR1	Linux kernel and bootstrap	A contiguous measurement of the kernel and boot ramfs data.
 PCR2	Application	A contiguous, in-order measurement of the user applications, without the boot ramfs.
@@ -273,28 +295,48 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
           ["name", pkg.name],
           ["v", pkg.version],
           ["m", module_id],
+          // we don't use PCR3
           ...[0, 1, 2, 4, 8].map((id) => [
             "x",
             bytesToHex(pcrs.get(id)!),
             `PCR${id}`,
           ]),
+          ["build", build ? JSON.stringify(build) : ""],
+          ["instance", instance ? JSON.stringify(instance) : ""],
           // admin interface relay with spam protection
           ["relay", inboxRelayUrl],
           // expires in 3 hours, together with attestation doc
           ["expiration", "" + (now() + 3 * 3600)],
+          ["alt", "noauth-enclaved instance"],
         ],
       },
       privkey
     );
     console.log("announcement", signed);
+    const relays = [...instanceAnnounceRelays];
+    if (!relays.length)
+      relays.push(
+        ...[
+          "wss://relay.nostr.band/",
+          "wss://relay.damus.io",
+          "wss://relay.primal.net",
+        ]
+      );
+
     try {
-      await relay.publish(signed);
+      const promises = relays.map((url) => {
+        const r = new Relay(url, agent);
+        return r.publish(signed).finally(() => r.dispose());
+      });
+
+      const results = await Promise.allSettled(promises);
+      if (!results.find((r) => r.status === "fulfilled"))
+        throw new Error("Failed to announce");
 
       // schedule next announcement
       setTimeout(announce, ANNOUNCEMENT_INTERVAL);
     } catch (e) {
       console.log("Failed to announce", e);
-      relay.reconnect();
 
       // retry faster than normal
       setTimeout(announce, ANNOUNCEMENT_INTERVAL / 10);
@@ -303,10 +345,77 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
   announce();
 }
 
+async function getInfo(parentUrl: string) {
+  // get build and instance info from the enclave parent
+  // and verify that info matches our own attestation
+  const ws = new WebSocket(parentUrl);
+  const reply = await new Promise<Info | null>((ok, err) => {
+    ws.onopen = () => {
+      const att = nsmGetAttestation();
+      if (!att) {
+        ok({});
+        return;
+      }
+      const attData = nsmParseAttestation(att);
+      ws.send(
+        JSON.stringify({
+          id: "start",
+          method: "start",
+          params: [att.toString("base64")],
+        })
+      );
+      // return null to retry on timeout
+      const timer = setTimeout(() => ok(null), 10000);
+      ws.onmessage = (ev) => {
+        clearTimeout(timer);
+        const data = ev.data.toString("utf8");
+        try {
+          const r = JSON.parse(data);
+          if (r.id !== "start") throw new Error("Bad reply id");
+          if (r.error) throw new Error(r.error);
+          const { build, instance, instanceAnnounceRelays } = JSON.parse(
+            r.result
+          );
+          if (!build || !instance) throw new Error("Bad reply");
+
+          const prod = !!attData.pcrs.get(0)!.find((c) => c !== 0);
+          if (prod) {
+            verifyBuild(attData, build);
+            verifyInstance(attData, instance);
+          }
+          console.log(
+            new Date(),
+            "got valid build and instance info",
+            build,
+            instance
+          );
+          ok({ build, instance, instanceAnnounceRelays });
+        } catch (e: any) {
+          console.log("parent reply error", e, data);
+          err(e.message || e.toString());
+        }
+      };
+    };
+  });
+  if (reply === null) {
+    // pause and retry
+    console.log(new Date(), "Failed to get info from parent, will retry...");
+    await new Promise((ok) => setTimeout(ok, 3000));
+    return getInfo(parentUrl);
+  } else {
+    return reply;
+  }
+}
+
 export async function startEnclave(opts: {
   relayUrl: string;
   proxyUrl: string;
+  parentUrl: string;
 }) {
+  const { build, instance, instanceAnnounceRelays } = await getInfo(
+    opts.parentUrl
+  );
+
   // we're talking to the outside world using socks proxy
   // that lives in enclave parent and our tcp traffic
   // is socat-ed through vsock interface
@@ -390,15 +499,23 @@ export async function startEnclave(opts: {
   requestListener.addPubkey(adminPubkey);
 
   // announce ourselves
-  startAnnouncing(adminPrivkey, relay.url, relay);
+  startAnnouncing({
+    agent,
+    build,
+    instance,
+    privkey: adminPrivkey,
+    inboxRelayUrl: relay.url,
+    instanceAnnounceRelays,
+  });
 }
 
 // main
 export function mainEnclave(argv: string[]) {
   if (!argv.length) throw new Error("Service not specified");
   if (argv[0] === "run") {
-    const proxyUrl = argv[1];
-    const relayUrl = argv?.[2] || "wss://relay.nsec.app";
-    startEnclave({ proxyUrl, relayUrl });
+    const proxyUrl = argv?.[1] || "socks://127.0.0.1:1080";
+    const parentUrl = argv?.[2] || "ws://127.0.0.1:2080";
+    const relayUrl = argv?.[3] || "wss://relay.nsec.app";
+    startEnclave({ proxyUrl, parentUrl, relayUrl });
   }
 }
