@@ -34,11 +34,11 @@ The `noauth-enclaved` service consists of two processes - one called `enclave` (
 
 The `enclave` code is reproducibly built into a docker image and then into AWS Nitro enclave image. The `parent` process runs a complementary service to supply the `enclave` process with build and instance metadata (`builder` and `launcher` info). The `builder` info is `kind:63795` event (`build signature`) generated during the enclave image build and tied to the resulting image. The `launcher` info is `kind:63796` event (`instance signature`) and is tied to the unique EC2 parent instance id. Both `build signature` and`instance signature` events are tied to the `attestation` produced by a running `enclave` process, discussed next.
 
-When the `enclave` process is started, it fetches the `build signature` and `instance signature` events from the `parent`, fetches the `attestation` from the AWS VM that's running it and validates the events against the `attestation` to make sure parent isn't misbehaving. The `enclave` process then generates a `service pubkey` and publishes a `kind:63793` event (`instance event`) that includes the `attestation`, `build signature` and `instance signature`. The event is published onto `launcher`'s outbox relays. A new `instance event` is published every `hour` to keep the `attestation` document fresh (it's signed by AWS and is valid for 3 hours).  
+When the `enclave` process is started, it fetches the `build signature` and `instance signature` events from the `parent`, fetches the `attestation` from the AWS VM that's running it and validates the events against the `attestation` to make sure parent isn't misbehaving. The `enclave` process then generates a `service pubkey` and publishes a `kind:63793` event (`instance event`) that includes the `attestation`, `build signature` and `instance signature`. The event is published onto `launcher` and `builder` outbox relays. A new `instance event` is published every `hour` to keep the `attestation` document fresh (it's signed by AWS and is valid for 3 hours).  
 
 Clients discovering the `noauth-enclaved` instances using `instance events` can validate all the data included in the events - the `attestation`, `build signature` and `instance signature` are cryptographically tied together. If the `instance event` is valid, the client can be sure which specific version of the `enclaved` process is behind the `service pubkey`, which `builder` pubkey built the image, and which `launcher` pubkey is running it. 
 
-If client and/or user decide to use a particular `noauth-enclaved` instance, the user's `nsec` can be imported into the instance by sending a `nip46-like` request to the `service pubkey` on a relay, announced in the `instance event`. After the `nsec` is imported, the instance starts processing `nip46` requests for the imported `nsec`.  
+If client and/or user decide to use a particular `noauth-enclaved` instance, the user's `nsec` can be imported into the instance by sending a `nip46-like` request to the `service pubkey` on a relay, announced in the `instance event`. After the `nsec` is imported, the instance starts processing `nip46` requests for it.  
 
 ## Building the docker image
 
@@ -62,7 +62,7 @@ This will generate an enclave image at `./build/noauth-enclaved.eif` and `./buil
 
 To tie `${YOUR_NPUB}` to the produced `.eif` image, we will use `PCR8` register. The build script will generate a single-use `x509` key and will create an x509 certificate self-signed by that key at `./build/crt.pem`. The `certificate` will include `O=Nostr` and `OU=${YOUR_NPUB}`.
 
-The build script will ask `nitro-cli` to sign the `.eif` with the x509 key and provide the `certificate`. The fingerprint hash of the `certificate` will be included as `PCR8` in `./build/pcrs.json` and will be reported in the `attestation`.
+The build script will ask `nitro-cli` to sign the `.eif` with the x509 key and provide the `certificate`. The fingerprint hash of the `certificate` will be included as `PCR8` in `./build/pcrs.json` and will be reported in the `attestation`. The temporary x509 key is then deleted to avoid leaking it.
 
 Next, a `build signature` event of `kind:63795` will be generated, including tags `["cert", <certificate_base64>]` and `["PCR8", <PCR8>]`. A nip46 connection to `${YOUR_NPUB}` will be established, the event signed and written to `./build/build.json`. This event will be supplied to the `enclave` process and included in the `instance event` along with the `attestation`, allowing clients to verify the `PCR8` against the `certificate` and your npub, ensuring that builder info can't be forged.
 
@@ -80,7 +80,7 @@ Then you can launch the `enclave`:
 ``` 
 This will first ask for your EC2 instance ID, convert it into `PCR4` register format, create nip46 connection to `${YOUR_NPUB}` (can differ from the builder npub) and produce an `instance signature` event of `kind:63796` with tag `["PCR4", <PCR4>]` in a file `./instance/instance.json`. It will also copy `./build/build.json` to `./instance/build.json`. These two files will be served by the `parent` process to the `enclave` when it's launched.
 
-The `PCR4` value will be reported in an `attestation` from withing the enclave, and since EC2 instance IDs are unique to any launched instance, this value uniquely ties the `enclave` to `${YOUR_NPUB}` using `instance signature` event. 
+The `PCR4` value will be reported in an `attestation` from withing the enclave, and since EC2 instance IDs are unique to any launched instance and never reused, this value ties the `enclave` to `${YOUR_NPUB}` using `instance signature` event. 
 
 Next, `nitro-cli` will be used to launch a Nitro enclave using the `./build/noauth-enclave.eif` image. The `enclave` process starts with `./enclave.sh`, which launches two `socat` processes to forward `tcp` ports 	`1080` and `2080` to the `vsock` interface, and launches the `enclave` process of the `noauth-enclaved`. 
 
@@ -88,7 +88,7 @@ The `enclave` process will generate a new Nostr key to serve as `service pubkey`
 
 Next, `enclave` will make a WebSocket request to `2080` to their `parent`, supplying the `attestation`. The `parent` will verify the validity of the `attestation`'s `PCR8` value against `build signature` from `./instance/build.json` and validity of `PCR4` value against `./instance/instance.json`, and then forward these events to the `enclave`. 
 
-The `enclave` will validate the received `build signature` and `instance signature` events against it's own `attestation`, and then publish the `instance` event of `kind:63793` with tags `["build", <build-signature-event>]`, `["instance", <instance-signature-event>]` and base64-encoded `attestation` as `content`. The `PCR` values will be included as `x` tags for discovery on relays. The `instance` event will be published onto the `outbox` relays of the `launcher` - the `instance signature` event's pubkey. FIXME why not also builder's relays?
+The `enclave` will validate the received `build signature` and `instance signature` events against it's own `attestation`, and then publish the `instance` event of `kind:63793` with tags `["build", <build-signature-event>]`, `["instance", <instance-signature-event>]` and base64-encoded `attestation` as `content`. The `PCR` values will be included as `x` tags for discovery on relays. The `instance` event will be published onto the outbox relays of the `builder` and `launcher`.
 
 Example `instance` event:
 ```
@@ -143,7 +143,7 @@ Example `instance` event:
 }
 ``` 
 
-Matching `build signature` example:
+Matching `build signature` example (from `build` tag):
 ```
 {
   "id": "16b94c206beceb8295d08d3a7f1d4b68699c181ca539a801f4e485fe8bb81f9a",
@@ -172,7 +172,7 @@ Matching `build signature` example:
 }
 ```
 
-Matching instance signature example:
+Matching `instance signature` example (from `instance` tag):
 ```
 {
   "id": "d27bfa50b0705b5a1b48171bb0e3edc9d12b2b83208f485830d9e91446e91d84",

@@ -70,8 +70,8 @@ class ParentServer {
       verifyInstance(attData, instance);
     }
 
-    const relays = await fetchOutboxRelays([instance.pubkey]);
-    console.log("outbox relays", instance.pubkey, relays);
+    const relays = await fetchOutboxRelays([build.pubkey, instance.pubkey]);
+    console.log("outbox relays", build.pubkey, instance.pubkey, relays);
 
     return JSON.stringify({
       build: build,
