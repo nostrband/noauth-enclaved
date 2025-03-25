@@ -13,6 +13,8 @@ From AWS:
 
 **The security of the AWS Nitro enclaves depends 100% on AWS - if you don't trust AWS then stop reading now and don't use this code.**
 
+Read [this](https://blog.trailofbits.com/2024/02/16/a-few-notes-on-aws-nitro-enclaves-images-and-attestation/) for an independent analysis of the AWS Nitro enclaves' security.
+
 ## Why put Nostr keys on a server?
 After more than 2 years in existence, there is still no reliable `nip46` signer. There is a tension between self-custody and reliability of the signer: you either keep the keys on your device (which is unreliable, especially on mobile), or you upload the keys to a signer server (which *usually* means you are 100% trusting the server to not steal your keys). To learn more about  the issue, read [here](https://hodlbod.npub.pro/post/1731367036685/). 
 
@@ -198,6 +200,8 @@ Matching `instance signature` example (from `instance` tag):
 ```
 
 Anyone who discovers the `instance` event can validate the supplied `attestation` in the `content` against `build` and `instance` tags and decide if they are willing to trust the instance. FIXME link to verification code. They could then communicate to the `service pubkey` using a relay specified in the `relay` tag.
+
+FIXME prod/dev build signature tags?
 
 ## Importing the nsec
 
