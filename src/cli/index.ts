@@ -15,11 +15,11 @@ import {
 } from "../enclave/modules/nostr-tools";
 import readline from "node:readline";
 import { Nip46Client } from "./nip46-client";
-import { now, pcrDigest } from "../enclave/modules/utils";
+import { now } from "../enclave/modules/utils";
 import { fetchOutboxRelays, rawEvent } from "./utils";
 import { Relay } from "../enclave/modules/relay";
 import { Signer } from "../enclave/modules/types";
-import { sha384 } from "@noble/hashes/sha2";
+import { pcrDigest } from "../enclave/modules/aws";
 
 async function readLine() {
   const rl = readline.createInterface({
@@ -37,9 +37,11 @@ async function readLine() {
 async function importKey({
   relayUrl,
   adminPubkey,
+  keyRelay,
 }: {
   relayUrl: string;
   adminPubkey: string;
+  keyRelay: string;
 }) {
   console.log("Enter nsec:");
   let line = await readLine();
@@ -65,7 +67,7 @@ async function importKey({
 
   const reply = await client.send({
     method: "import_key",
-    params: [privkey.toString("hex")],
+    params: [privkey.toString("hex"), keyRelay],
   });
 
   if (reply !== "ok") throw new Error("Invalid reply");
@@ -88,10 +90,10 @@ function readPubkey(dir: string) {
     .toString("utf8")
     .trim();
   console.log("npub", npub);
-  if (!npub) throw new Error("No pubkey")
+  if (!npub) throw new Error("No pubkey");
   const { type, data: pubkey } = nip19.decode(npub);
   if (type !== "npub") throw new Error("Invalid npub");
-  return pubkey;  
+  return pubkey;
 }
 
 async function createSigner(pubkey: string): Promise<Signer> {
@@ -131,9 +133,7 @@ export async function publishBuild({
   );
   console.log("docker info", docker);
 
-  const pcrs = JSON.parse(
-    fs.readFileSync(dir+"/pcrs.json").toString("utf8")
-  );
+  const pcrs = JSON.parse(fs.readFileSync(dir + "/pcrs.json").toString("utf8"));
   console.log("pcrs", pcrs);
 
   const cert = readCert(dir);
@@ -222,7 +222,9 @@ async function ensureInstanceSignature(dir: string) {
   console.log("pubkey", pubkey);
 
   try {
-    const event = JSON.parse(fs.readFileSync(dir + "/instance.json").toString("utf8"));
+    const event = JSON.parse(
+      fs.readFileSync(dir + "/instance.json").toString("utf8")
+    );
     console.log("sig event", event);
     if (!validateEvent(event) || !verifyEvent(event))
       throw new Error("Invalid event");
@@ -277,7 +279,8 @@ export function mainCli(argv: string[]) {
     case "import_key": {
       const relayUrl = argv[1];
       const adminPubkey = argv[2];
-      return importKey({ relayUrl, adminPubkey });
+      const keyRelay = argv?.[3] || "wss://relay.nsec.app";
+      return importKey({ relayUrl, adminPubkey, keyRelay });
     }
     case "sign_build": {
       const dir = argv?.[1] || "./build/";

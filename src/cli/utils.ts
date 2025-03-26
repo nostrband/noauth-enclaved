@@ -1,6 +1,7 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 import { Event, Filter } from "../enclave/modules/nostr-tools";
 import { Relay } from "../enclave/modules/relay";
+import { normalizeRelay } from "../enclave/modules/utils";
 
 const KIND_CONTACTS = 3;
 const KIND_RELAYS = 10002;
@@ -104,16 +105,7 @@ export function prepareRelays(
     // normalize
     const normal = relays
       // normalize urls
-      .map((r) => {
-        try {
-          const u = new URL(r);
-          if (u.protocol !== "wss:" && u.protocol !== "ws:") return undefined;
-          if (u.hostname.endsWith(".onion")) return undefined;
-          if (u.hostname === "localhost") return undefined;
-          if (u.hostname === "127.0.0.1") return undefined;
-          return u.href;
-        } catch {}
-      })
+      .map((r) => normalizeRelay(r))
       // only valid ones
       .filter((u) => !!u)
       // remove bad relays and outbox

@@ -27,3 +27,10 @@ export interface AttestationData {
   pcrs: Map<number, Uint8Array>;
   module_id: string;
 }
+
+export interface InstanceInfo {
+  build?: Event;
+  instance?: Event;
+  instanceAnnounceRelays?: string[];
+}
+

@@ -3,13 +3,12 @@ import socks5 from "node-socks5-server";
 import { RawData, WebSocket, WebSocketServer } from "ws";
 import fs from "node:fs";
 import {
-  Event,
   validateEvent,
   verifyEvent,
 } from "../enclave/modules/nostr-tools";
-import { verifyBuild, verifyInstance } from "../enclave/modules/parent";
 import { nsmParseAttestation } from "../enclave/modules/nsm";
 import { fetchOutboxRelays } from "../cli/utils";
+import { verifyBuild, verifyInstance } from "../enclave/modules/aws";
 
 interface Req {
   id: string;
