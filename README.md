@@ -223,3 +223,14 @@ echo ${NSEC} | tsx src/index.ts cli import_key wss://relay.nsec.app ${SERVICE_PU
 The `wss://relay.nsec.app` is announced in the `kind:63793` event above.
 
 Note that the `enclave` does not process nip46 `connect` requests - you need to import the `nsec` into `nsec.app` first, then establish a connection to some client, then log-out in `nsec.app` and import the key into the enclave. After that, nip46 requests sent by the client will be served by the enclave.
+
+Another method to import a key without depending on `nsec.app` is `connect_key` - it imports your nsec and connects it to a `client pubkey` you provide and gives full permissions to it:
+```
+echo ${NSEC} | tsx src/index.ts cli connect_key wss://relay.nsec.app ${SERVICE_PUBKEY} ${CLIENT_PUBKEY}
+```
+
+To delete your key call `delete_key`:
+```
+echo ${NSEC} | tsx src/index.ts cli delete_key wss://relay.nsec.app ${SERVICE_PUBKEY}
+```
+
