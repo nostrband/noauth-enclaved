@@ -205,3 +205,21 @@ FIXME prod/dev build signature tags?
 
 ## Importing the nsec
 
+**DANGER: do not use your real nsec! This is experimental tech!**
+
+First, find an instance `service pubkey`:
+
+```
+SERVICE_PUBKEY=`echo '{"kinds":[63793], "limit": 1}' | nak req wss://relay.primal.net | jq .pubkey`
+```
+
+The `wss://relay.primal.net` is an outbox relay of the launcher of the dev instance.
+
+Then import your nsec:
+```
+echo ${NSEC} | tsx src/index.ts cli import_key wss://relay.nsec.app ${SERVICE_PUBKEY}
+```
+
+The `wss://relay.nsec.app` is announced in the `kind:63793` event above.
+
+Note that the `enclave` does not process nip46 `connect` requests - you need to import the `nsec` into `nsec.app` first, then establish a connection to some client, then log-out in `nsec.app` and import the key into the enclave. After that, nip46 requests sent by the client will be served by the enclave.
