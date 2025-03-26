@@ -39,6 +39,20 @@ export class RequestListener {
     }
   }
 
+  private req(relay: Relay, id: string, pubkeys: string[]) {
+    relay.req({
+      id,
+      fetch: false,
+      filter: {
+        "#p": pubkeys,
+        kinds: [KIND_NIP46, KIND_ADMIN],
+        since: now() - 10,
+      },
+      onClosed: () => relay.close(id),
+      onEvent: (e: Event) => this.onEvent(relay, e),
+    });
+  }
+
   public addPubkey(pubkey: string, relays: string[]) {
     for (const url of relays) {
       const [id, pubkeys] = this.pubkeys.add(pubkey, url);
@@ -48,17 +62,23 @@ export class RequestListener {
       // for new requests, id will be the same to a previous
       // id of a batch so a new REQ will override the old REQ on relay
       const relay = this.relays.get(url) || new Relay(url, this.agent);
-      relay.req({
-        id,
-        fetch: false,
-        filter: {
-          "#p": pubkeys,
-          kinds: [KIND_NIP46, KIND_ADMIN],
-          since: now() - 10,
-        },
-        onClosed: () => relay.close(id),
-        onEvent: (e: Event) => this.onEvent(relay, e),
-      });
+      this.req(relay, id, pubkeys);
+    }
+  }
+
+  public removePubkey(pubkey: string) {
+    for (const url of this.pubkeys.relays(pubkey)) {
+      const [id, pubkeys] = this.pubkeys.remove(pubkey, url);
+      if (!id) continue;
+
+      const relay = this.relays.get(url);
+      if (!relay) continue; // wtf?
+
+      if (pubkeys.length) {
+        this.req(relay, id, pubkeys);
+      } else {
+        relay.close(id);
+      }
     }
   }
 }
@@ -91,8 +111,22 @@ export class PermListener {
     }
   }
 
-  public addPubkey(pubkey: string) {
+  private subscribe(relay: Relay, id: string, pubkeys: string[]) {
+    relay.req({
+      id,
+      fetch: false,
+      filter: {
+        authors: pubkeys,
+        "#t": [APP_TAG],
+        kinds: [KIND_DATA],
+        since: now() - 10,
+      },
+      onClosed: () => relay.close(id),
+      onEvent: this.onEvent.bind(this),
+    });
+  }
 
+  public addPubkey(pubkey: string) {
     // send to all relays
     for (const relay of this.relays) {
       const [id, pubkeys] = this.pubkeys.add(pubkey, relay.url);
@@ -115,18 +149,24 @@ export class PermListener {
       });
 
       // resubscribe to listen to perm updates
-      relay.req({
-        id,
-        fetch: false,
-        filter: {
-          authors: pubkeys,
-          "#t": [APP_TAG],
-          kinds: [KIND_DATA],
-          since: now() - 10,
-        },
-        onClosed: () => relay.close(id),
-        onEvent: this.onEvent.bind(this),
-      });
+      this.subscribe(relay, id, pubkeys);
+    }
+  }
+
+  public removePubkey(pubkey: string) {
+    const relays = this.pubkeys.relays(pubkey);
+    for (const url of relays) {
+      const [id, pubkeys] = this.pubkeys.add(pubkey, url);
+      if (!id) continue;
+
+      const relay = this.relays.find((r) => r.url === url);
+      if (!relay) continue; // wtf?
+
+      if (pubkeys.length) {
+        this.subscribe(relay, id, pubkeys);
+      } else {
+        relay.close(id);
+      }
     }
   }
 }

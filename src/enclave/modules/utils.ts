@@ -37,6 +37,35 @@ export class PubkeyBatcher {
     return [id, reqPubkeys];
   }
 
+  public relays(pubkey: string) {
+    const relays = this.pubkeyRelays.get(pubkey);
+    return relays ? [...relays.values()] : [];
+  }
+
+  public remove(pubkey: string, relay: string): [string, string[]] {
+    const empty = ["", []] as [string, string[]];
+    const relays = this.pubkeyRelays.get(pubkey);
+    if (!relays) return empty;
+
+    // delete relay from pubkey
+    if (!relays.delete(relay)) return empty;
+    this.pubkeyRelays.set(pubkey, relays);
+
+    const reqs = this.relayReqs.get(relay);
+    if (!reqs) return empty;
+
+    for (const [id, pubkeys] of reqs.entries()) {
+      const index = pubkeys.findIndex((p) => p === pubkey);
+      if (index >= 0) {
+        pubkeys.splice(index, 1);
+        if (!pubkeys.length) reqs.delete(id);
+        return [id, pubkeys];
+      }
+    }
+
+    return empty;
+  }
+
   public has(pubkey: string) {
     return this.pubkeyRelays.has(pubkey);
   }
@@ -51,5 +80,4 @@ export function normalizeRelay(r: string) {
     if (u.hostname === "127.0.0.1") return undefined;
     return u.href;
   } catch {}
-
 }

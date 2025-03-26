@@ -1,6 +1,8 @@
 NAME=noauth-enclaved
-SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+SOURCE_DATE_EPOCH=`cat timestamp.txt` #$(git log -1 --pretty=%ct)
 echo "Commit timestamp" $SOURCE_DATE_EPOCH
+
+mkdir -p build
 
 docker \
     run \

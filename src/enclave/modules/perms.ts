@@ -17,6 +17,7 @@ interface App {
   updateTimestamp: number;
   permUpdateTimestamp: number;
   perms: Perm[];
+  fullAccess: boolean;
 }
 
 export class Perms {
@@ -73,6 +74,7 @@ export class Perms {
           ? Math.max(app.permUpdateTimestamp, data.permUpdateTimestamp)
           : data.permUpdateTimestamp,
         perms: [],
+        fullAccess: false,
       };
     };
 
@@ -190,7 +192,11 @@ export class Perms {
       npub: nip19.npubEncode(pubkey),
       appNpub: nip19.npubEncode(req.clientPubkey),
     });
-    const appPerms = this.apps.get(appId)?.perms;
+    const app = this.apps.get(appId);
+    if (!app) return "ignore";
+    if (app.fullAccess) return "allow";
+
+    const appPerms = app.perms;
     if (!appPerms || !appPerms.length) return "ignore";
 
     // exact match first
@@ -215,5 +221,31 @@ export class Perms {
 
     // no perm - need to ask the user
     return "ask";
+  }
+
+  public connect(pubkey: string, clientPubkey: string) {
+    const npub = nip19.npubEncode(pubkey);
+    const appNpub = nip19.npubEncode(clientPubkey);
+    const appId = this.appId({
+      npub,
+      appNpub,
+    });
+    this.apps.set(appId, {
+      npub: nip19.npubEncode(pubkey),
+      appNpub: nip19.npubEncode(clientPubkey),
+      fullAccess: true,
+      perms: [],
+      permUpdateTimestamp: Date.now(),
+      updateTimestamp: Date.now(),
+      timestamp: Date.now(),
+    });
+    console.log(new Date(), "connected", pubkey, "and", clientPubkey);
+  }
+
+  public delete(pubkey: string) {
+    const appIds = [...this.apps.keys()].filter((id) =>
+      id.startsWith(nip19.npubEncode(pubkey))
+    );
+    for (const id of appIds) this.apps.delete(id);
   }
 }

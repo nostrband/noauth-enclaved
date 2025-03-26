@@ -34,15 +34,7 @@ async function readLine() {
   });
 }
 
-async function importKey({
-  relayUrl,
-  adminPubkey,
-  keyRelay,
-}: {
-  relayUrl: string;
-  adminPubkey: string;
-  keyRelay: string;
-}) {
+async function getPrivkey() {
   console.log("Enter nsec:");
   let line = await readLine();
   line = line.trim();
@@ -57,21 +49,79 @@ async function importKey({
   const privkey = Buffer.from(privkeyHex, "hex");
   if (privkey.length !== 32) throw new Error("Invalid privkey");
 
+  return privkey;
+}
+
+async function getClient(
+  relayUrl: string,
+  signerPubkey: string,
+  privkey: Uint8Array
+) {
   const client = new Nip46Client({
     relayUrl,
     kind: KIND_ADMIN,
-    signerPubkey: adminPubkey,
+    signerPubkey,
     privkey,
   });
   await client.start();
+  return client;
+}
 
+async function importKey({
+  relayUrl,
+  adminPubkey,
+  keyRelay,
+}: {
+  relayUrl: string;
+  adminPubkey: string;
+  keyRelay: string;
+}) {
+  const privkey = await getPrivkey();
+  const client = await getClient(relayUrl, adminPubkey, privkey);
   const reply = await client.send({
     method: "import_key",
     params: [privkey.toString("hex"), keyRelay],
   });
-
   if (reply !== "ok") throw new Error("Invalid reply");
   console.log("Key imported to enclave");
+}
+
+async function connectKey({
+  relayUrl,
+  adminPubkey,
+  keyRelay,
+  appPubkey,
+}: {
+  relayUrl: string;
+  adminPubkey: string;
+  keyRelay: string;
+  appPubkey: string;
+}) {
+  const privkey = await getPrivkey();
+  const client = await getClient(relayUrl, adminPubkey, privkey);
+  const reply = await client.send({
+    method: "connect_key",
+    params: [privkey.toString("hex"), appPubkey, keyRelay],
+  });
+  if (reply !== "ok") throw new Error("Invalid reply");
+  console.log("Key imported to enclave and connected to", appPubkey);
+}
+
+async function deleteKey({
+  relayUrl,
+  adminPubkey,
+}: {
+  relayUrl: string;
+  adminPubkey: string;
+}) {
+  const privkey = await getPrivkey();
+  const client = await getClient(relayUrl, adminPubkey, privkey);
+  const reply = await client.send({
+    method: "delete_key",
+    params: [],
+  });
+  if (reply !== "ok") throw new Error("Invalid reply");
+  console.log("Key deleted from enclave");
 }
 
 function readCert(dir: string) {
@@ -281,6 +331,18 @@ export function mainCli(argv: string[]) {
       const adminPubkey = argv[2];
       const keyRelay = argv?.[3] || "wss://relay.nsec.app";
       return importKey({ relayUrl, adminPubkey, keyRelay });
+    }
+    case "connect_key": {
+      const relayUrl = argv[1];
+      const adminPubkey = argv[2];
+      const appPubkey = argv[3];
+      const keyRelay = argv?.[4] || "wss://relay.nsec.app";
+      return connectKey({ relayUrl, adminPubkey, keyRelay, appPubkey });
+    }
+    case "delete_key": {
+      const relayUrl = argv[1];
+      const adminPubkey = argv[2];
+      return deleteKey({ relayUrl, adminPubkey });
     }
     case "sign_build": {
       const dir = argv?.[1] || "./build/";

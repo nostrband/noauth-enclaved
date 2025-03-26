@@ -87,16 +87,19 @@ class Nip46Signer extends Nip46Server {
   }
 }
 
+interface AdminMethods {
+  onImportKey: (key: string, relays: string) => string;
+  onConnectKey: (key: string, connectPubkey: string, relays: string) => string;
+  onDeleteKey: (clientPubkey: string) => string;
+}
+
 // admin interface for 'import_key' method
 class AdminSigner extends Nip46Server {
-  private onImportKey: (key: string, relays: string) => void;
+  private methods: AdminMethods;
 
-  constructor(
-    privkey: Uint8Array,
-    { onImportKey }: { onImportKey: (key: string, relays: string) => void }
-  ) {
+  constructor(privkey: Uint8Array, methods: AdminMethods) {
     super(new SignerImpl(privkey), KIND_ADMIN);
-    this.onImportKey = onImportKey;
+    this.methods = methods;
   }
 
   protected async check(_: Nip46Req): Promise<Decision> {
@@ -104,13 +107,20 @@ class AdminSigner extends Nip46Server {
   }
 
   protected async handle(req: Nip46Req): Promise<string> {
-    if (req.method !== "import_key") throw new Error("Unknown method");
-    // whoever has the key could send it by themselves, but
-    // why force that privacy leak?
-    // const pubkey = getPublicKey(Buffer.from(req.params[0], "hex"));
-    // if (pubkey !== req.clientPubkey) throw new Error("Invalid importer");
-    this.onImportKey(req.params[0], req.params?.[1] || "");
-    return "ok";
+    switch (req.method) {
+      case "import_key":
+        return this.methods.onImportKey(req.params[0], req.params?.[1] || "");
+      case "delete_key":
+        return this.methods.onDeleteKey(req.clientPubkey);
+      case "connect_key":
+        return this.methods.onConnectKey(
+          req.params[0],
+          req.params[1],
+          req.params?.[2] || ""
+        );
+      default:
+        throw new Error("Unknown method");
+    }
   }
 }
 
@@ -201,10 +211,7 @@ export async function startEnclave(opts: {
     onImportKey: (key: string, relays: string) => {
       const privkey = Buffer.from(key, "hex");
       const pubkey = getPublicKey(privkey);
-      if (pubkey === adminPubkey) {
-        console.log("Can't import bunker key");
-        return;
-      }
+      if (pubkey === adminPubkey) throw new Error("Can't import bunker key");
       // FIXME what if list of relays changed?
       if (keys.has(pubkey)) {
         console.log("already exists", pubkey);
@@ -212,6 +219,28 @@ export async function startEnclave(opts: {
         console.log(new Date(), "imported key", pubkey);
         addKey(privkey, relays);
       }
+      return "ok";
+    },
+    onConnectKey(key, connectPubkey, relays) {
+      const privkey = Buffer.from(key, "hex");
+      const pubkey = getPublicKey(privkey);
+      if (pubkey === adminPubkey) throw new Error("Can't import bunker key");
+      // FIXME what if list of relays changed?
+      if (keys.has(pubkey)) {
+        console.log("already exists", pubkey);
+      } else {
+        console.log(new Date(), "imported key", pubkey);
+        addKey(privkey, relays);
+      }
+      // assign full-access perms
+      perms.connect(pubkey, connectPubkey);
+      return "ok";
+    },
+    onDeleteKey(pubkey) {
+      keys.delete(pubkey);
+      requestListener.removePubkey(pubkey);
+      permListener.removePubkey(pubkey);
+      return "ok";
     },
   });
 
