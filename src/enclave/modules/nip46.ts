@@ -58,7 +58,8 @@ export class Nip46Server {
         case "ask":
           const npub = nip19.npubEncode(await this.getSigner().getPublicKey());
           res.result = "auth_url";
-          res.error = `${NSEC_APP_ORIGIN}/key/${npub}?confirm-event=true&reqId=${id}&popup=true`;
+          const confirmMethod = req.method === 'connect' ? 'confirm-connect' : 'confirm-event'
+          res.error = `${NSEC_APP_ORIGIN}/key/${npub}?${confirmMethod}=true&reqId=${id}&popup=true`;
           break;
         case "ignore":
           return undefined;

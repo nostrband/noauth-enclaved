@@ -25,6 +25,10 @@ class Nip46Signer extends Nip46Server {
     this.perms = perms;
   }
 
+  private reqConnect(_: Nip46Req) {
+    return Promise.resolve("ack");
+  }
+
   private reqGetPublicKey(_: Nip46Req) {
     return this.getSigner().getPublicKey();
   }
@@ -69,6 +73,8 @@ class Nip46Signer extends Nip46Server {
 
   protected async handle(req: Nip46Req): Promise<string> {
     switch (req.method) {
+      case "connect":
+        return this.reqConnect(req);
       case "get_public_key":
         return this.reqGetPublicKey(req);
       case "sign_event":
@@ -91,6 +97,7 @@ interface AdminMethods {
   onImportKey: (key: string, relays: string) => string;
   onConnectKey: (key: string, connectPubkey: string, relays: string) => string;
   onDeleteKey: (clientPubkey: string) => string;
+  onHasKey: (clientPubkey: string) => string;
 }
 
 // admin interface for 'import_key' method
@@ -108,10 +115,14 @@ class AdminSigner extends Nip46Server {
 
   protected async handle(req: Nip46Req): Promise<string> {
     switch (req.method) {
+      case "ping":
+        return "pong";
       case "import_key":
         return this.methods.onImportKey(req.params[0], req.params?.[1] || "");
       case "delete_key":
         return this.methods.onDeleteKey(req.clientPubkey);
+      case "has_key":
+        return this.methods.onHasKey(req.clientPubkey);
       case "connect_key":
         return this.methods.onConnectKey(
           req.params[0],
@@ -241,6 +252,9 @@ export async function startEnclave(opts: {
       requestListener.removePubkey(pubkey);
       permListener.removePubkey(pubkey);
       return "ok";
+    },
+    onHasKey(pubkey) {
+      return keys.has(pubkey) ? "true" : "false";
     },
   });
 
