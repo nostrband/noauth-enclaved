@@ -66,7 +66,8 @@ class Nip46Signer extends Nip46Server {
   }
 
   protected async check(req: Nip46Req): Promise<Decision> {
-    const dec = this.perms.check(await this.getSigner().getPublicKey(), req);
+    const pubkey = await this.getSigner().getPublicKey();
+    const dec = this.perms.check(pubkey, req);
     console.log(new Date(), "req dec", dec, req);
     return dec;
   }
@@ -98,6 +99,7 @@ interface AdminMethods {
   onConnectKey: (key: string, connectPubkey: string, relays: string) => string;
   onDeleteKey: (clientPubkey: string) => string;
   onHasKey: (clientPubkey: string) => string;
+  onGenerateTestKey: (relays: string) => string;
 }
 
 // admin interface for 'import_key' method
@@ -123,6 +125,10 @@ class AdminSigner extends Nip46Server {
         return this.methods.onDeleteKey(req.clientPubkey);
       case "has_key":
         return this.methods.onHasKey(req.clientPubkey);
+      case "generate_test_key":
+        return this.methods.onGenerateTestKey(
+          req.params[0] || "wss://relay.nsec.app"
+        );
       case "connect_key":
         return this.methods.onConnectKey(
           req.params[0],
@@ -200,7 +206,7 @@ export async function startEnclave(opts: {
   });
 
   // helper
-  const addKey = (privkey: Uint8Array, relaysStr: string) => {
+  const addKey = (privkey: Uint8Array, relaysStr: string, test = false) => {
     const relays = [
       ...new Set(
         relaysStr
@@ -210,11 +216,12 @@ export async function startEnclave(opts: {
           .filter((r) => !!r) as string[]
       ),
     ];
+    if (!relays.length) relays.push("wss://relay.nsec.app");
 
     const pubkey = getPublicKey(privkey);
     keys.set(pubkey, new Nip46Signer(privkey, perms));
     requestListener.addPubkey(pubkey, relays);
-    permListener.addPubkey(pubkey);
+    if (!test) permListener.addPubkey(pubkey);
   };
 
   // handler of 'import_key' method
@@ -255,6 +262,27 @@ export async function startEnclave(opts: {
     },
     onHasKey(pubkey) {
       return keys.has(pubkey) ? "true" : "false";
+    },
+    onGenerateTestKey(relays: string) {
+      const privkey = generateSecretKey();
+      addKey(privkey, relays, true);
+      const pubkey = getPublicKey(privkey);
+      const secret = perms.addTestKey(pubkey);
+
+      // auto-expiry
+      setTimeout(() => {
+        // delete after 1 day
+        this.onDeleteKey(pubkey);
+      }, 24 * 3600 * 1000);
+
+      // bunker url
+      return (
+        `bunker://${pubkey}?secret=${secret}` +
+        requestListener
+          .pubkeyRelays(pubkey)
+          .map((r) => `&relay=${r}`)
+          .join("")
+      );
     },
   });
 

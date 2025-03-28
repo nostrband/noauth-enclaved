@@ -1,7 +1,16 @@
 #!/bin/sh
+# bash doesn't exist in alpine docker linux
 
 SOCKS=1080
 PARENT=2080
+
+echo "rng_current:"
+RNG=`cat /sys/devices/virtual/misc/hw_random/rng_current`
+echo $RNG
+if [ "$RNG" != "nsm-hwrng" ]; then
+  echo "Bad random number generator"
+  exit -1
+fi
 
 # no ip address is assigned to lo interface by default
 ifconfig lo 127.0.0.1

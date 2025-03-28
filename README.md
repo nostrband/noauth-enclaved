@@ -234,3 +234,8 @@ To delete your key call `delete_key`:
 echo ${NSEC} | tsx src/index.ts cli delete_key wss://relay.nsec.app ${SERVICE_PUBKEY}
 ```
 
+
+To generate a test key with a reusable `bunker url` and full permissions, valid for 1 day:
+```
+tsx src/index.ts cli generate_test_key wss://relay.nsec.app ${SERVICE_PUBKEY} # returns a bunker url
+```

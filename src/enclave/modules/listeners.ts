@@ -81,6 +81,10 @@ export class RequestListener {
       }
     }
   }
+
+  public pubkeyRelays(pubkey: string) {
+    return this.pubkeys.relays(pubkey);
+  }
 }
 
 // load and watch for updates of user perms on a set of relays

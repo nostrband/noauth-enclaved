@@ -43,6 +43,9 @@ PCRS=pcrs.json
 # build eif from docker tar
 nitro-cli build-enclave --docker-uri ${FILE}:latest --output-file ${BUILD}${FILE}.eif --private-key ${BUILD}${KEY} --signing-certificate ${BUILD}${CRT} --name ${NAME} --version ${VER} > ${BUILD}${PCRS}
 
+# delete image to reclaim space
+docker image rm ${FILE}:latest
+
 # drop the key to make sure it can't be stolen,
 # otherwise someone else could launch an instance 
 # that would report itself as $NPUB's 

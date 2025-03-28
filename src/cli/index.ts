@@ -9,6 +9,7 @@ import {
   KIND_BUILD_SIGNATURE,
 } from "../enclave/modules/consts";
 import {
+  generateSecretKey,
   nip19,
   validateEvent,
   verifyEvent,
@@ -122,6 +123,28 @@ async function deleteKey({
   });
   if (reply !== "ok") throw new Error("Invalid reply");
   console.log("Key deleted from enclave");
+}
+
+async function generateTestKey({
+  relayUrl,
+  adminPubkey,
+  relayList,
+}: {
+  relayUrl: string;
+  adminPubkey: string;
+  relayList: string;
+}) {
+  const privkey = generateSecretKey();
+  const client = await getClient(relayUrl, adminPubkey, privkey);
+  const reply = await client.send({
+    method: "generate_test_key",
+    params: [relayList],
+  });
+  if (!reply.startsWith("bunker")) throw new Error("Invalid reply");
+  console.log(
+    "Key generated and valid for 1 day, bunker url with full access:"
+  );
+  console.log(reply);
 }
 
 function readCert(dir: string) {
@@ -255,7 +278,6 @@ async function signBuild(dir: string) {
     pubkey: await signer.getPublicKey(),
     tags: [
       ["-"], // not for publishing
-      ["expiration", "" + (now() - 1000)], // expired
       ["cert", cert],
       ["PCR8", pcrs.Measurements["PCR8"]],
     ],
@@ -308,7 +330,6 @@ async function ensureInstanceSignature(dir: string) {
     pubkey: await signer.getPublicKey(),
     tags: [
       ["-"], // not for publishing
-      ["expiration", "" + (now() - 1000)], // expired
       ["PCR4", pcr4],
     ],
   };
@@ -343,6 +364,16 @@ export function mainCli(argv: string[]) {
       const relayUrl = argv[1];
       const adminPubkey = argv[2];
       return deleteKey({ relayUrl, adminPubkey });
+    }
+    case "generate_test_key": {
+      const relayUrl = argv[1];
+      const adminPubkey = argv[2];
+      const relayList = argv?.[2] || "wss://relay.nsec.app";
+      return generateTestKey({
+        relayUrl,
+        adminPubkey,
+        relayList,
+      });
     }
     case "sign_build": {
       const dir = argv?.[1] || "./build/";

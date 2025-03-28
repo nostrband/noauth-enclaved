@@ -3,6 +3,7 @@
 import { nip19 } from "nostr-tools";
 import { Event } from "./nostr-tools";
 import { Decision, Nip46Req, Signer } from "./types";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 
 interface Perm {
   perm: string;
@@ -24,6 +25,7 @@ export class Perms {
   private getSigner: (pubkey: string) => Signer | undefined;
   private apps = new Map<string, App>();
   private eventIds = new Set<string>();
+  private testPubkeys = new Map<string, string>();
 
   constructor(getSigner: (pubkey: string) => Signer | undefined) {
     this.getSigner = getSigner;
@@ -193,7 +195,25 @@ export class Perms {
       appNpub: nip19.npubEncode(req.clientPubkey),
     });
     const app = this.apps.get(appId);
-    if (!app) return "ignore";
+    if (!app) {
+      // test key?
+      if (this.testPubkeys.has(pubkey)) {
+        if (req.method === "connect") {
+          // connect allowed by secret
+          if (req.params && req.params.length >= 2 && req.params[1]) {
+            const secret = req.params[1];
+            if (this.testPubkeys.get(pubkey) === secret) return "allow";
+            else return "disallow";
+          }
+        } else {
+          // all allowed for test keys
+          return "allow";
+        }
+      }
+
+      // non-test key
+      return "ignore";
+    }
     if (app.fullAccess) return "allow";
 
     const appPerms = app.perms;
@@ -247,5 +267,11 @@ export class Perms {
       id.startsWith(nip19.npubEncode(pubkey))
     );
     for (const id of appIds) this.apps.delete(id);
+  }
+
+  public addTestKey(pubkey: string) {
+    const secret = bytesToHex(randomBytes(16));
+    this.testPubkeys.set(pubkey, secret);
+    return secret;
   }
 }
