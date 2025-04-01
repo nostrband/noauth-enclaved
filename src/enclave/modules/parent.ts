@@ -30,13 +30,13 @@ export async function getInfo(parentUrl: string) {
           const r = JSON.parse(data);
           if (r.id !== "start") throw new Error("Bad reply id");
           if (r.error) throw new Error(r.error);
-          const { build, instance, instanceAnnounceRelays } = JSON.parse(
+          const { build, instance, instanceAnnounceRelays, prod } = JSON.parse(
             r.result
           );
           if (!build || !instance) throw new Error("Bad reply");
 
-          const prod = !!attData.pcrs.get(0)!.find((c) => c !== 0);
-          if (prod) {
+          const notDebug = !!attData.pcrs.get(0)!.find((c) => c !== 0);
+          if (notDebug) {
             verifyBuild(attData, build);
             verifyInstance(attData, instance);
           }
@@ -46,7 +46,7 @@ export async function getInfo(parentUrl: string) {
             build,
             instance
           );
-          ok({ build, instance, instanceAnnounceRelays });
+          ok({ build, instance, instanceAnnounceRelays, prod });
         } catch (e: any) {
           console.log("parent reply error", e, data);
           err(e.message || e.toString());

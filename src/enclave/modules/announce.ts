@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import { SocksProxyAgent } from "socks-proxy-agent";
-import { Event, finalizeEvent, getPublicKey } from "./nostr-tools";
+import {
+  Event,
+  UnsignedEvent,
+  finalizeEvent,
+  getPublicKey,
+} from "./nostr-tools";
 import { nsmGetAttestation, nsmParseAttestation } from "./nsm";
 import { ANNOUNCEMENT_INTERVAL, KIND_INSTANCE, REPO } from "./consts";
 import { now } from "./utils";
@@ -14,6 +19,7 @@ export function startAnnouncing({
   privkey,
   inboxRelayUrl,
   instanceAnnounceRelays = [],
+  prod = false,
 }: {
   agent: SocksProxyAgent;
   build?: Event;
@@ -21,6 +27,7 @@ export function startAnnouncing({
   privkey: Uint8Array;
   inboxRelayUrl: string;
   instanceAnnounceRelays?: string[];
+  prod?: boolean;
 }) {
   const announce = async () => {
     const pubkey = getPublicKey(privkey);
@@ -43,33 +50,59 @@ PCR4	Instance ID of the parent instance	A contiguous measurement of the ID of th
 PCR8	Enclave image file signing certificate	A measure of the signing certificate specified for the enclave image file. Ensures that the attestation process succeeds only when the enclave was booted from an enclave image file signed by a specific certificate.
      */
 
-    const signed = finalizeEvent(
-      {
-        kind: KIND_INSTANCE,
-        created_at: now(),
-        content: attestation.toString("base64"),
-        tags: [
-          ["r", REPO],
-          ["name", pkg.name],
-          ["v", pkg.version],
-          ["m", module_id],
-          // we don't use PCR3
-          ...[0, 1, 2, 4, 8].map((id) => [
-            "x",
-            bytesToHex(pcrs.get(id)!),
-            `PCR${id}`,
-          ]),
-          ["build", build ? JSON.stringify(build) : ""],
-          ["instance", instance ? JSON.stringify(instance) : ""],
-          // admin interface relay with spam protection
-          ["relay", inboxRelayUrl],
-          // expires in 3 hours, together with attestation doc
-          ["expiration", "" + (now() + 3 * 3600)],
-          ["alt", "noauth-enclaved instance"],
-        ],
-      },
-      privkey
-    );
+    // PCR0=all_zeroes means we're in debug mode
+    const env = !pcrs.get(0)!.find((v) => v !== 0)
+      ? "debug"
+      : prod
+      ? "prod"
+      : "dev";
+
+    const tmpl: UnsignedEvent = {
+      pubkey,
+      kind: KIND_INSTANCE,
+      created_at: now(),
+      content: attestation.toString("base64"),
+      tags: [
+        ["r", REPO],
+        ["name", pkg.name],
+        ["v", pkg.version],
+        ["m", module_id],
+        // we don't use PCR3
+        ...[0, 1, 2, 4, 8].map((id) => [
+          "x",
+          bytesToHex(pcrs.get(id)!),
+          `PCR${id}`,
+        ]),
+        ["t", env],
+        // admin interface relay with spam protection
+        ["relay", inboxRelayUrl],
+        // expires in 3 hours, together with attestation doc
+        ["expiration", "" + (now() + 3 * 3600)],
+        ["alt", "noauth-enclaved instance"],
+      ],
+    };
+    if (build) {
+      tmpl.tags.push(["build", JSON.stringify(build)]);
+      tmpl.tags.push(["p", build.pubkey, "builder"]);
+      const prod_build = build.tags.find(
+        (t) => t.length > 1 && t[0] === "t" && t[1] === "prod"
+      );
+      if (!prod_build && prod) {
+        throw new Error("Build is not for production!");
+      }
+    }
+    if (instance) {
+      tmpl.tags.push(["instance", JSON.stringify(instance)]);
+      tmpl.tags.push(["p", instance.pubkey, "launcher"]);
+      const prod_ins = instance.tags.find(
+        (t) => t.length > 1 && t[0] === "t" && t[1] === "prod"
+      );
+      if (!prod_ins && prod) {
+        throw new Error("Instance is not for production!");
+      }
+    }
+
+    const signed = finalizeEvent(tmpl, privkey);
     console.log("announcement", signed);
     const relays = [...instanceAnnounceRelays];
     if (!relays.length)

@@ -146,7 +146,7 @@ export async function startEnclave(opts: {
   proxyUrl: string;
   parentUrl: string;
 }) {
-  const { build, instance, instanceAnnounceRelays } = await getInfo(
+  const { build, instance, instanceAnnounceRelays, prod } = await getInfo(
     opts.parentUrl
   );
 
@@ -179,7 +179,7 @@ export async function startEnclave(opts: {
   const requestListener = new RequestListener(agent, {
     onRequest: async (relay: Relay, pubkey: string, e: Event) => {
       const key = keys.get(pubkey);
-      if (!key) throw new Error("Unknown key");
+      if (!key) return; // ignore
       await process(e, key, relay);
     },
   });
@@ -304,6 +304,7 @@ export async function startEnclave(opts: {
     privkey: adminPrivkey,
     inboxRelayUrl: opts.relayUrl,
     instanceAnnounceRelays,
+    prod,
   });
 }
 

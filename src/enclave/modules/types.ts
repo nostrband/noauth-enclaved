@@ -32,5 +32,5 @@ export interface InstanceInfo {
   build?: Event;
   instance?: Event;
   instanceAnnounceRelays?: string[];
+  prod?: boolean;
 }
-

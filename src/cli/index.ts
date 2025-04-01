@@ -7,6 +7,7 @@ import {
   KIND_BUILD,
   REPO,
   KIND_BUILD_SIGNATURE,
+  KIND_INSTANCE_SIGNATURE,
 } from "../enclave/modules/consts";
 import {
   generateSecretKey,
@@ -258,6 +259,8 @@ export async function publishBuild({
 }
 
 async function signBuild(dir: string) {
+  const prod = process.env.PROD === "true";
+
   const pubkey = readPubkey(dir);
   console.log("pubkey", pubkey);
 
@@ -278,6 +281,7 @@ async function signBuild(dir: string) {
     pubkey: await signer.getPublicKey(),
     tags: [
       ["-"], // not for publishing
+      ["t", prod ? "prod" : "dev"],
       ["cert", cert],
       ["PCR8", pcrs.Measurements["PCR8"]],
     ],
@@ -290,6 +294,8 @@ async function signBuild(dir: string) {
 }
 
 async function ensureInstanceSignature(dir: string) {
+  const prod = process.env.PROD === "true";
+
   const pubkey = readPubkey(dir);
   console.log("pubkey", pubkey);
 
@@ -301,6 +307,8 @@ async function ensureInstanceSignature(dir: string) {
     if (!validateEvent(event) || !verifyEvent(event))
       throw new Error("Invalid event");
     if (event.pubkey !== pubkey) throw new Error("Invalid event pubkey");
+    const prod_ins = !!event.tags.find(t => t.length > 1 && t[0] === "t" && t[1] === "prod");
+    if (prod_ins !== prod) throw new Error("Existing instance signature prod/dev is different");
     console.log("Have valid instance signature");
     return;
   } catch (e) {
@@ -325,11 +333,12 @@ async function ensureInstanceSignature(dir: string) {
 
   const unsigned = {
     created_at: now(),
-    kind: KIND_BUILD_SIGNATURE,
+    kind: KIND_INSTANCE_SIGNATURE,
     content: "",
     pubkey: await signer.getPublicKey(),
     tags: [
       ["-"], // not for publishing
+      ["t", prod ? "prod" : "dev"],
       ["PCR4", pcr4],
     ],
   };

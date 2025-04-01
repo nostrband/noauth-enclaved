@@ -1,8 +1,8 @@
 {
-  "containerimage.config.digest": "sha256:5c421a77e1c183ca658cd8a9920d95e497f55e0e2f67a752289e5242cca401ed",
+  "containerimage.config.digest": "sha256:803791f1d9a3d402dde2a194ce60b4a26678273a69a22bcdeef78c456478b04e",
   "containerimage.descriptor": {
     "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
-    "digest": "sha256:cbb8e8a8e59831efff4ee28e87925c1c6e801b81b69ffdad7f5f2e03fae06822",
+    "digest": "sha256:d9a5353875b62b2e3a9b7baf5d9ad33168c289760674f3aa04d3f3ed8c971486",
     "size": 1876,
     "annotations": {
       "org.opencontainers.image.created": "2025-03-28T09:38:11Z"
@@ -12,6 +12,6 @@
       "os": "linux"
     }
   },
-  "containerimage.digest": "sha256:cbb8e8a8e59831efff4ee28e87925c1c6e801b81b69ffdad7f5f2e03fae06822",
+  "containerimage.digest": "sha256:d9a5353875b62b2e3a9b7baf5d9ad33168c289760674f3aa04d3f3ed8c971486",
   "image.name": "docker.io/library/noauth-enclaved:latest"
 }

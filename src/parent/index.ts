@@ -2,10 +2,7 @@
 import socks5 from "node-socks5-server";
 import { RawData, WebSocket, WebSocketServer } from "ws";
 import fs from "node:fs";
-import {
-  validateEvent,
-  verifyEvent,
-} from "../enclave/modules/nostr-tools";
+import { validateEvent, verifyEvent } from "../enclave/modules/nostr-tools";
 import { nsmParseAttestation } from "../enclave/modules/nsm";
 import { fetchOutboxRelays } from "../cli/utils";
 import { verifyBuild, verifyInstance } from "../enclave/modules/aws";
@@ -26,7 +23,13 @@ class ParentServer {
   private wss: WebSocketServer;
   private dir: string;
 
-  constructor({ port, dir = "./instance/" }: { port: number; dir?: string }) {
+  constructor({
+    port,
+    dir = "./instance/",
+  }: {
+    port: number;
+    dir?: string;
+  }) {
     this.dir = dir;
     this.wss = new WebSocketServer({ port });
     this.wss.on("connection", this.onConnect.bind(this));
@@ -72,10 +75,12 @@ class ParentServer {
     const relays = await fetchOutboxRelays([build.pubkey, instance.pubkey]);
     console.log("outbox relays", build.pubkey, instance.pubkey, relays);
 
+    const prod = process.env.PROD === "true";
     return JSON.stringify({
       build: build,
       instance: instance,
       instanceAnnounceRelays: relays,
+      prod
     });
   }
 
