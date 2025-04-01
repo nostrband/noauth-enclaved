@@ -241,14 +241,14 @@ FIXME prod/dev build signature tags?
 
 ## Admin API
 
-To import a key into `noauth-enclaved` you can use `nip46-like` protocol using `kind:24135` (instaed of `kind:24133`). Requests must target `service pubkey` and must be signed by the `user key`. Methods:
+To import a key into `noauth-enclaved` you can use `nip46`-like protocol using `kind:24135` (instead of `kind:24133`). Requests must target `service pubkey` and must be signed by the `user key`. Methods:
 
 | method            | params | result | description |
 |-------------------|--------|--------|-------------|
 | ping              | []     | "pong" | check if signer is alive |
 | has_key           | []     | "true" OR "false" | check if caller's key is imported |
 | import_key        | [`<privkey>`, `<comma-separated-nip46-relays>`]    | "ok" | import caller's key |
-| connect_key       | [`<privkey>`, `<app_pubkey>`, `<comma-separated-nip46-relays>`]    | "ok" | import caller's key and connect to app_pubkey with full perms |
+| connect_key       | [`<privkey>`, `<app_pubkey>`, `<comma-separated-nip46-relays>`]    | "ok" | import caller's key and connect to `app_pubkey` with full perms |
 | delete_key        | []     | "ok"   | delete caller's key |
 | generate_test_key | [`<comma-separated-nip46-relays>`] | `<bunker-url>` | create new key valid for 1 day with full perms and return bunker url |
 
