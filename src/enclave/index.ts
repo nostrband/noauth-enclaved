@@ -176,8 +176,10 @@ export async function startEnclave(opts: {
     }
   };
 
+  let reqsTotal = 0;
   const requestListener = new RequestListener(agent, {
     onRequest: async (relay: Relay, pubkey: string, e: Event) => {
+      reqsTotal++;
       const key = keys.get(pubkey);
       if (!key) return; // ignore
       await process(e, key, relay);
@@ -296,6 +298,13 @@ export async function startEnclave(opts: {
   // add admin to request listener, but not perms listener
   adminRequestListener.addPubkey(adminPubkey, [opts.relayUrl]);
 
+  const getStats = async () => {
+    const stats = new Map<string, string>();
+    stats.set("pubkeys", ""+keys.size);
+    stats.set("reqs", ""+reqsTotal);
+    return stats;
+  };
+
   // announce ourselves
   startAnnouncing({
     agent,
@@ -305,6 +314,7 @@ export async function startEnclave(opts: {
     inboxRelayUrl: opts.relayUrl,
     instanceAnnounceRelays,
     prod,
+    getStats,
   });
 }
 

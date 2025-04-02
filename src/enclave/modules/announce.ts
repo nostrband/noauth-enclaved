@@ -5,6 +5,7 @@ import {
   UnsignedEvent,
   finalizeEvent,
   getPublicKey,
+  nip19,
 } from "./nostr-tools";
 import { nsmGetAttestation, nsmParseAttestation } from "./nsm";
 import { ANNOUNCEMENT_INTERVAL, KIND_INSTANCE, REPO } from "./consts";
@@ -20,6 +21,7 @@ export function startAnnouncing({
   inboxRelayUrl,
   instanceAnnounceRelays = [],
   prod = false,
+  getStats,
 }: {
   agent: SocksProxyAgent;
   build?: Event;
@@ -28,6 +30,7 @@ export function startAnnouncing({
   inboxRelayUrl: string;
   instanceAnnounceRelays?: string[];
   prod?: boolean;
+  getStats?: () => Promise<Map<string, string>>;
 }) {
   const announce = async () => {
     const pubkey = getPublicKey(privkey);
@@ -57,7 +60,7 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
       ? "prod"
       : "dev";
 
-    const tmpl: UnsignedEvent = {
+    const ins: UnsignedEvent = {
       pubkey,
       kind: KIND_INSTANCE,
       created_at: now(),
@@ -81,9 +84,46 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
         ["alt", "noauth-enclaved instance"],
       ],
     };
+
+    const prof: UnsignedEvent = {
+      pubkey,
+      kind: 0,
+      created_at: now(),
+      content: JSON.stringify({
+        name: "noauth-enclaved",
+        picture: "https://nsec.app/favicon.ico",
+        about: `A safe nip46 signer for your Nostr keys.\n
+This is an instance of noauth-enclaved running inside AWS Nitro Enclave.\n
+Validate instance attestation at https://enclaved.org/instance/${nip19.npubEncode(
+          pubkey
+        )}\n
+Learn more at https://github.com/nostrband/noauth-enclaved/blob/main/README.md\n`,
+      }),
+      tags: [
+        ["t", "enclaved"],
+        ["t", "noauth-enclaved"],
+        ["t", "nip46"],
+      ],
+    };
+
+    const stats: UnsignedEvent | undefined = getStats
+      ? {
+          pubkey,
+          kind: 1,
+          created_at: now(),
+          content:
+            "Stats:\n" +
+            [...(await getStats()).entries()]
+              .map(([key, value]) => `${key}: ${value}`)
+              .join("\n"),
+          tags: [["t", "noauth-enclaved"]],
+        }
+      : undefined;
+
     if (build) {
-      tmpl.tags.push(["build", JSON.stringify(build)]);
-      tmpl.tags.push(["p", build.pubkey, "builder"]);
+      prof.tags.push(["p", build.pubkey, "builder"]);
+      ins.tags.push(["build", JSON.stringify(build)]);
+      ins.tags.push(["p", build.pubkey, "builder"]);
       const prod_build = build.tags.find(
         (t) => t.length > 1 && t[0] === "t" && t[1] === "prod"
       );
@@ -92,8 +132,9 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
       }
     }
     if (instance) {
-      tmpl.tags.push(["instance", JSON.stringify(instance)]);
-      tmpl.tags.push(["p", instance.pubkey, "launcher"]);
+      prof.tags.push(["p", instance.pubkey, "launcher"]);
+      ins.tags.push(["instance", JSON.stringify(instance)]);
+      ins.tags.push(["p", instance.pubkey, "launcher"]);
       const prod_ins = instance.tags.find(
         (t) => t.length > 1 && t[0] === "t" && t[1] === "prod"
       );
@@ -102,19 +143,19 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
       }
     }
 
-    const signed = finalizeEvent(tmpl, privkey);
-    console.log("announcement", signed);
-    const relays = [...instanceAnnounceRelays];
-    if (!relays.length)
-      relays.push(
-        ...[
-          "wss://relay.nostr.band/",
-          "wss://relay.damus.io",
-          "wss://relay.primal.net",
-        ]
-      );
+    const publish = async (tmpl: UnsignedEvent) => {
+      const signed = finalizeEvent(tmpl, privkey);
+      console.log("signed", signed);
+      const relays = [...instanceAnnounceRelays];
+      if (!relays.length)
+        relays.push(
+          ...[
+            "wss://relay.nostr.band/",
+            "wss://relay.damus.io",
+            "wss://relay.primal.net",
+          ]
+        );
 
-    try {
       const promises = relays.map((url) => {
         const r = new Relay(url, agent);
         return r.publish(signed).finally(() => r.dispose());
@@ -122,7 +163,15 @@ PCR8	Enclave image file signing certificate	A measure of the signing certificate
 
       const results = await Promise.allSettled(promises);
       if (!results.find((r) => r.status === "fulfilled"))
-        throw new Error("Failed to announce");
+        throw new Error("Failed to publish");
+    };
+
+    try {
+      // publish
+      await publish(ins);
+      await publish(prof);
+      if (stats)
+        await publish(stats);
 
       // schedule next announcement
       setTimeout(announce, ANNOUNCEMENT_INTERVAL);

@@ -1,3 +1,4 @@
+import { bytesToHex } from "@noble/hashes/utils";
 import { verifyBuild, verifyInstance } from "./aws";
 import { nsmGetAttestation, nsmParseAttestation } from "./nsm";
 import { InstanceInfo } from "./types";
@@ -21,8 +22,9 @@ export async function getInfo(parentUrl: string) {
           params: [att.toString("base64")],
         })
       );
-      // return null to retry on timeout
-      const timer = setTimeout(() => ok(null), 10000);
+      // return null to retry on timeout,
+      // 20sec timeout to fetch outbox relays
+      const timer = setTimeout(() => ok(null), 20000);
       ws.onmessage = (ev) => {
         clearTimeout(timer);
         const data = ev.data.toString("utf8");
@@ -39,6 +41,12 @@ export async function getInfo(parentUrl: string) {
           if (notDebug) {
             verifyBuild(attData, build);
             verifyInstance(attData, instance);
+          } else {
+            // attestation has empty pcr8 and pcr4...
+            // if (build.tags.find((t: string[]) => t.length > 1 && t[0] === "PCR8")?.[1] !== bytesToHex(attData.pcrs.get(8)!))
+            //   throw new Error("Invalid build info from parent");
+            if (instance.tags.find((t: string[]) => t.length > 1 && t[0] === "PCR4")?.[1] !== bytesToHex(attData.pcrs.get(4)!))
+              throw new Error("Invalid instance info from parent");
           }
           console.log(
             new Date(),
