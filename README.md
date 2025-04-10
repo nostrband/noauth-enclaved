@@ -1,32 +1,37 @@
 
 # Nostr Signer for AWS Nitro Enclave
 
-  
-
 **Noauth-enclaved** is a [nip46](https://github.com/nostr-protocol/nips/blob/master/46.md) signer to be deployed inside [AWS Nitro Enclave](https://aws.amazon.com/ec2/nitro/nitro-enclaves/). Such deployement allows clients to cryptographically verify various claims about the code running on the server, and thus feel (more) confident that their keys won't be stolen.
-
-  
 
 From AWS:
 
-> AWS Nitro Enclaves enables customers to create isolated compute environments to further protect and securely process highly sensitive data... Nitro Enclaves uses the same Nitro Hypervisor technology that provides CPU and memory isolation for EC2 instances... Nitro Enclaves includes cryptographic attestation for your software, so that you can be sure that only authorized code is running...
+> AWS Nitro Enclaves enables customers to create **isolated compute environments** to further protect and securely process highly sensitive data... Nitro Enclaves uses the same Nitro Hypervisor technology that provides **CPU and memory isolation** for EC2 instances... Nitro Enclaves includes **cryptographic attestation for your software**, so that you can be sure that only authorized code is running...
 
 **The security of the AWS Nitro enclaves depends 100% on AWS - if you don't trust AWS then stop reading now and don't use this code.**
 
-Read [this](https://blog.trailofbits.com/2024/02/16/a-few-notes-on-aws-nitro-enclaves-images-and-attestation/) for an independent analysis of the AWS Nitro enclaves' security.
+Read [this](https://blog.trailofbits.com/2024/02/16/a-few-notes-on-aws-nitro-enclaves-images-and-attestation/) and [this](https://blog.trailofbits.com/2024/09/24/notes-on-aws-nitro-enclaves-attack-surface/) for an independent analysis of the AWS Nitro enclaves' security.
 
 ## Why put Nostr keys on a server?
 After more than 2 years in existence, there is still no reliable `nip46` signer. There is a tension between self-custody and reliability of the signer: you either keep the keys on your device (which is unreliable, especially on mobile), or you upload the keys to a signer server (which *usually* means you are 100% trusting the server to not steal your keys). To learn more about  the issue, read [here](https://hodlbod.npub.pro/post/1731367036685/). 
 
-AWS Nitro enclaves promise to solve the problem of lack of trust for a particular service: anyone can verify the claims made by the service about the validity of the code that it's running (as long as one trusts AWS VM infrastructure). For a signer server in particular, this means there's much less chance for your keys to be stolen or hacked. Add to the mix a tie to `npub`s of people who built and launched the service, and you can use Nostr and WOT to discover and interact with provably safe services running inside AWS enclaves. The `noauth-enclaved` is the first prototype of such service.
+AWS Nitro enclaves promise to solve the problem of lack of trust for a particular service. The code running inside an enclave is fully isolated by AWS from the person launching it. The attestation signed by AWS and reproducible open-source code let anyone verify what exactly is happening inside the enclave (as long as one trusts AWS VM infrastructure). For a signer server in particular, this means there's much less chance for your keys to be stolen or hacked. Add to the mix a tie to `npub`s of people who built and launched the service, and you can use Nostr and WoT to discover and interact with provably safe services running inside AWS enclaves. The `noauth-enclaved` is the first prototype of such service.
 
 ## How it works?
 
-An app holding your nsec may discover an instance of `noauth-enclaved`, may verify it's cryptographic [`attestation`](https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html), and may upload your nsec to the instance. Once nsec is uploaded, the server starts processing `nip46` requests to your keys. Permissions of apps connected to your keys can be managed using [nsec.app](https://nsec.app) - they are saved on Nostr as encrypted events and are immediately discovered by the server.
+An app holding your nsec may discover an instance of `noauth-enclaved`, may verify it's cryptographic [`attestation`](https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html), and may upload your nsec to the instance. Once nsec is uploaded, the server starts processing `nip46` requests to your keys. Permissions of apps connected to your keys can be managed using [nsec.app](https://nsec.app) - they are saved on Nostr as encrypted events and are immediately discovered by the server. There is also an API (below) for more direct control over the keys.
 
 The `attestation` announced by the `noauth-enclaved` as a Nostr event includes a verifiable info about the `hashes` of the server-side code, an npub of the `builder` - the person who built the AWS Nitro enclave image, and an npub of the `launcher` - the person who launched (and is running) the built image on AWS. The `service pubkey` that signs the `instance` Nostr event can be used to communicate with the service in an end-to-end-encrypted way over Nostr relays. A section below for *Launching the instance* can serve as a draft NIP for discovery and verification of services running in AWS Nitro enclaves. 
 
 With the above data, clients can verify the validity of every `instance` event, can choose between builds (re-)produced by different people and instances launched by different people using WOT. Users can also reproduce a build of `noauth-enclaved` themselves to be sure which code is running in a specific instance. 
+
+## Properties
+
+The `noauth-enclaved` service running inside Nitro Enclave provides:
+- **attestation** - a document signed by AWS that specifies hashes of the code image running on the server
+- **isolation** - AWS virtualization layer ensures that whoever launched the enclave *does not have access* to whatever is happening in the enclave
+- **reproducibility** - the code of `noauth-enclaved` is open source and reproducibly built into an enclave image, allowing anyone to review it, rebuild it, and compare image hashes to ones published by any running instance
+- **attribution** - each image has a cryptographic link to `builder` npub that created the image, and `launcher` npub that is running it, allowing clients to apply WoT filters and other Nostr-enabled interactions
+- **reliability** - the end goal of deploying a signer on a server is achieved without a typical sacrifice of fully trusting a custodial black-box service
 
 ## Architecture
 
@@ -38,7 +43,7 @@ The `enclave` code is reproducibly built into a docker image and then into AWS N
 
 When the `enclave` process is started, it fetches the `build signature` and `instance signature` events from the `parent`, fetches the `attestation` from the AWS VM that's running it and validates the events against the `attestation` to make sure parent isn't misbehaving. The `enclave` process then generates a `service pubkey` and publishes a `kind:63793` event (`instance event`) that includes the `attestation`, `build signature` and `instance signature`. The event is published onto `launcher` and `builder` outbox relays. A new `instance event` is published every `hour` to keep the `attestation` document fresh (it's signed by AWS and is valid for 3 hours).  
 
-Clients discovering the `noauth-enclaved` instances using `instance events` can validate all the data included in the events - the `attestation`, `build signature` and `instance signature` are cryptographically tied together. If the `instance event` is valid, the client can be sure which specific version of the `enclaved` process is behind the `service pubkey`, which `builder` pubkey built the image, and which `launcher` pubkey is running it. 
+Clients discovering the `noauth-enclaved` instances using `instance events` can validate all the data included in the events - the `attestation`, `build signature` and `instance signature` are cryptographically tied together. If the `instance event` is valid, the client can be sure which specific version of the `enclaved` process is behind the `service pubkey`, which `builder` pubkey built the image, and which `launcher` pubkey is running it. Expected hashes are located in `pcrs.json` and `docker.json` files committed to this repo (updated whenever changes are made to the code).
 
 If client and/or user decide to use a particular `noauth-enclaved` instance, the user's `nsec` can be imported into the instance by sending a `nip46-like` request to the `service pubkey` on a relay, announced in the `instance event`. After the `nsec` is imported, the instance starts processing `nip46` requests for it.  
 
@@ -289,3 +294,7 @@ To generate a test key with a reusable `bunker url` and full permissions, valid 
 ```
 tsx src/index.ts cli generate_test_key wss://relay.nsec.app ${SERVICE_PUBKEY} # returns a bunker url
 ```
+
+
+// FIXME
+- publishing build reproduction/review event
