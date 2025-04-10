@@ -1,7 +1,7 @@
 
 # Nostr Signer for AWS Nitro Enclave
 
-**Noauth-enclaved** is a [nip46](https://github.com/nostr-protocol/nips/blob/master/46.md) signer to be deployed inside [AWS Nitro Enclave](https://aws.amazon.com/ec2/nitro/nitro-enclaves/). Such deployement allows clients to cryptographically verify various claims about the code running on the server, and thus feel (more) confident that their keys won't be stolen.
+**Noauth-enclaved** is a [nip46](https://github.com/nostr-protocol/nips/blob/master/46.md) signer to be deployed inside [AWS Nitro Enclave](https://aws.amazon.com/ec2/nitro/nitro-enclaves/). This allows clients to cryptographically verify various claims about the code running on the server, and thus feel (more) confident that their keys won't be stolen.
 
 From AWS:
 
